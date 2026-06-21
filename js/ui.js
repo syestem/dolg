@@ -156,7 +156,11 @@ function renderTabContent(state) {
 
 function renderDebts(state) {
   const debts = filterDebts(state.debts);
-  const selectedDebt = state.debts.find((debt) => debt.id === ui.selectedDebtId) || state.debts[0] || null;
+  const selectedDebt = debts.find((debt) => debt.id === ui.selectedDebtId) || debts[0] || null;
+
+  if (selectedDebt && ui.selectedDebtId !== selectedDebt.id) {
+    ui.selectedDebtId = selectedDebt.id;
+  }
 
   if (!state.debts.length) {
     return `
@@ -677,6 +681,7 @@ function handleClick(event) {
   } else if (action === "confirm-close-debt") {
     run(() => {
       setDebtStatus(target.dataset.id, "closed");
+      ui.debtFilter = "closed";
       ui.modal = null;
       toast("Долг закрыт", "success");
     });
@@ -805,6 +810,7 @@ function toggleDebt(id) {
   const next = debt.status === "active" ? "closed" : "active";
   run(() => {
     setDebtStatus(id, next);
+    ui.debtFilter = next === "closed" ? "closed" : "active";
     toast(next === "closed" ? "Долг закрыт" : "Долг переоткрыт", "success");
   });
 }
@@ -944,7 +950,7 @@ function selectWithNew(name, label, value, options, newName, newLabel) {
     <div class="field-row">
       <div class="field">
         <label for="${name}">${label}</label>
-        <select id="${name}" name="${name}" required>
+        <select id="${name}" name="${name}">
           ${options.map((option) => `
             <option value="${escapeAttribute(option)}" ${option === value ? "selected" : ""}>${escapeHtml(option)}</option>
           `).join("")}

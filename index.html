@@ -9,6 +9,14 @@
   </head>
   <body>
     <div id="app"></div>
-    <script type="module" src="./js/main.js"></script>
+    <script>
+      const useClassicFallback = location.protocol === "file:" || new URLSearchParams(location.search).has("classic");
+      const script = document.createElement("script");
+      script.src = useClassicFallback ? "./js/file-app.js" : "./js/main.js";
+      if (!useClassicFallback) {
+        script.type = "module";
+      }
+      document.body.append(script);
+    </script>
   </body>
 </html>

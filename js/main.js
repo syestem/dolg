@@ -1,9 +1,9 @@
 import { initUI } from "./ui.js";
 
-const root = document.querySelector("#app");
+const appRoot = document.querySelector("#app");
 
-if (!root) {
+if (!appRoot) {
   throw new Error("Корневой элемент приложения не найден");
 }
 
-initUI(root);
+initUI(appRoot);
