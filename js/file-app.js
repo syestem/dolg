@@ -1157,13 +1157,19 @@
     toast: null,
     importMode: "replace",
     syncStatus: "",
-    syncStatusType: ""
+    syncStatusType: "",
+    largeText: false,
+    paymentAnimation: null
   };
 
   let root;
+  let presentationFrame = 0;
+  let paymentAnimationTimer = 0;
 
   function initUI(element) {
     root = element;
+    ui.largeText = localStorage.getItem("debt-tracker-large-text-v1") === "true";
+    applyLargeTextPreference();
     root.addEventListener("click", handleClick);
     root.addEventListener("submit", handleSubmit);
     root.addEventListener("change", handleChange);
@@ -1182,13 +1188,137 @@
     root.innerHTML = `
       <div class="app-shell">
         ${renderHeader()}
-        ${renderSummary(state)}
+        ${ui.tab === "debts" && state.debts.length ? renderMainOverview(state) : ""}
         ${renderTabs()}
         ${renderTabContent(state)}
       </div>
       ${renderModal(state)}
       ${renderToast()}
     `;
+    schedulePresentationUpdates();
+  }
+
+  function schedulePresentationUpdates() {
+    window.cancelAnimationFrame(presentationFrame);
+    presentationFrame = window.requestAnimationFrame(() => {
+      drawSparklines();
+      animatePaymentFeedback();
+    });
+  }
+
+  function drawSparklines() {
+    root.querySelectorAll("[data-sparkline-points]").forEach((canvas) => {
+      const points = canvas.dataset.sparklinePoints
+        .split(",")
+        .map(Number)
+        .filter(Number.isFinite);
+
+      if (points.length < 3) {
+        return;
+      }
+
+      const rect = canvas.getBoundingClientRect();
+      const pixelRatio = window.devicePixelRatio || 1;
+      const width = Math.max(1, Math.round(rect.width * pixelRatio));
+      const height = Math.max(1, Math.round(rect.height * pixelRatio));
+      canvas.width = width;
+      canvas.height = height;
+
+      const context = canvas.getContext("2d");
+      const padding = 6 * pixelRatio;
+      const min = Math.min(...points);
+      const max = Math.max(...points);
+      const range = max - min || 1;
+      const step = (width - padding * 2) / (points.length - 1);
+
+      context.clearRect(0, 0, width, height);
+      context.lineWidth = 2 * pixelRatio;
+      context.lineJoin = "round";
+      context.lineCap = "round";
+      context.strokeStyle = "#70d79b";
+      context.beginPath();
+
+      points.forEach((point, index) => {
+        const x = padding + index * step;
+        const y = padding + ((max - point) / range) * (height - padding * 2);
+        if (index === 0) {
+          context.moveTo(x, y);
+        } else {
+          context.lineTo(x, y);
+        }
+      });
+      context.stroke();
+
+      const endPoint = points[points.length - 1];
+      const endX = padding + (points.length - 1) * step;
+      const endY = padding + ((max - endPoint) / range) * (height - padding * 2);
+      context.fillStyle = "#b8f3cc";
+      context.beginPath();
+      context.arc(endX, endY, 3.5 * pixelRatio, 0, Math.PI * 2);
+      context.fill();
+    });
+  }
+
+  function animatePaymentFeedback() {
+    const animation = ui.paymentAnimation;
+    if (!animation || animation.started) {
+      return;
+    }
+
+    const balance = root.querySelector(`[data-animated-balance="${animation.debtId}"]`);
+    const progress = root.querySelector(`[data-animated-progress="${animation.debtId}"]`);
+    if (!balance) {
+      ui.paymentAnimation = null;
+      return;
+    }
+
+    animation.started = true;
+    const fromBalance = Number(balance.dataset.balanceFrom);
+    const targetBalance = Number(balance.dataset.balanceTo);
+    const targetProgress = Number(progress?.dataset.progressTarget);
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+    if (progress) {
+      progress.style.setProperty("--progress", `${targetProgress}%`);
+    }
+
+    if (reducedMotion) {
+      balance.textContent = formatBalance(targetBalance);
+      finishPaymentAnimation();
+      return;
+    }
+
+    balance.classList.add("balance-countdown");
+    const startedAt = performance.now();
+    const duration = 760;
+
+    const tick = (now) => {
+      const progressValue = Math.min((now - startedAt) / duration, 1);
+      const eased = 1 - Math.pow(1 - progressValue, 3);
+      const current = fromBalance + (targetBalance - fromBalance) * eased;
+      balance.textContent = formatBalance(Math.max(current, 0));
+
+      if (progressValue < 1) {
+        window.requestAnimationFrame(tick);
+      } else {
+        balance.textContent = formatBalance(targetBalance);
+        finishPaymentAnimation();
+      }
+    };
+
+    window.requestAnimationFrame(tick);
+  }
+
+  function finishPaymentAnimation() {
+    window.clearTimeout(paymentAnimationTimer);
+    paymentAnimationTimer = window.setTimeout(() => {
+      ui.paymentAnimation = null;
+      render();
+    }, 1350);
+  }
+
+  function applyLargeTextPreference() {
+    document.documentElement.classList.toggle("large-text", ui.largeText);
   }
 
   function renderHeader() {
@@ -1196,46 +1326,48 @@
       <header class="topbar">
         <div class="brand">
           <h1>Трекер долгов</h1>
-          <p>Личный журнал долгов, платежей и начислений с локальным хранением и JSON-бэкапом.</p>
+          <p>Всё важное о долгах и платежах - сразу перед глазами.</p>
         </div>
         <div class="top-actions">
+          <label class="large-text-toggle" title="Увеличить текст во всём приложении">
+            <input type="checkbox" data-action="toggle-large-text" ${ui.largeText ? "checked" : ""}>
+            <span>Крупный текст</span>
+          </label>
           <button class="button ghost" type="button" data-action="export-json">Экспорт JSON</button>
           <button class="button ghost" type="button" data-action="open-import">Импорт JSON</button>
-          <button class="button primary" type="button" data-action="open-debt">Новый долг</button>
+          <button class="button primary" type="button" data-action="open-debt">+ Новый долг</button>
         </div>
       </header>
     `;
   }
 
-  function renderSummary(state) {
+  function renderMainOverview(state) {
     const summary = getSummary(state);
+    const progress = getOverviewProgress(summary);
+    const recentEntries = getRecentEntries(state, 6);
+
     return `
-      <section class="summary-grid" aria-label="Сводка">
-        <article class="metric-card">
-          <span>Общий остаток активных</span>
-          <strong>${formatMoney(summary.activeBalance)}</strong>
-        </article>
-        <article class="metric-card">
-          <span>Выплачено всего</span>
-          <strong>${formatMoney(summary.totalPaid)}</strong>
-        </article>
-        <article class="metric-card">
-          <span>Выплачено в счёт долга</span>
-          <strong>${formatMoney(summary.paidToDebt)}</strong>
-        </article>
-        <article class="metric-card">
-          <span>Активных долгов</span>
-          <strong>${summary.activeCount}</strong>
-        </article>
-        <article class="metric-card">
-          <span>Закрытых долгов</span>
-          <strong>${summary.closedCount}</strong>
-        </article>
-        <article class="metric-card">
-          <span>Выплачено за месяц</span>
-          <strong>${formatMoney(summary.currentMonthPaid)}</strong>
-        </article>
+      <section class="overview-hero" aria-label="Главная сводка">
+        <div class="overview-copy">
+          <span class="overview-eyebrow">Главное сейчас</span>
+          <h2>Осталось выплатить</h2>
+          <strong class="overview-amount">${formatMoney(summary.activeBalance)}</strong>
+          <p>Уже погашено <b>${formatMoney(summary.paidToDebt)}</b></p>
+          <div class="overview-notes">
+            <span>${summary.activeCount ? `Активных долгов: ${summary.activeCount}` : "Все долги погашены"}</span>
+            <span>За этот месяц: ${formatMoney(summary.currentMonthPaid)}</span>
+          </div>
+        </div>
+        <div class="overview-progress" aria-label="Общий прогресс погашения ${progress}%">
+          <strong>${progress}%</strong>
+          <span>погашено</span>
+          <div class="overview-progress-track" aria-hidden="true">
+            <div class="overview-progress-fill" style="--progress: ${progress}%"></div>
+          </div>
+          <p>Погашено ${progress}% - осталось ${formatMoney(summary.activeBalance)}</p>
+        </div>
       </section>
+      ${renderRecentEntries(recentEntries)}
     `;
   }
 
@@ -1286,9 +1418,9 @@
       return `
         <main class="tab-panel">
           <section class="empty-state">
-            <h2>Долгов пока нет</h2>
-            <p>Создайте первый долг, затем добавляйте платежи и начисления. Сводка, аналитика и аудит появятся автоматически.</p>
-            <button class="button primary" type="button" data-action="open-debt">Создать долг</button>
+            <h2>Начнём с первого долга</h2>
+            <p>Добавьте сумму и банк - дальше всё будет видно здесь.</p>
+            <button class="button primary" type="button" data-action="open-debt">+ Добавить первый долг</button>
           </section>
         </main>
       `;
@@ -1302,7 +1434,7 @@
             <button class="button ${ui.debtFilter === "closed" ? "primary" : "ghost"}" type="button" data-action="set-debt-filter" data-filter="closed">Закрытые</button>
             <button class="button ${ui.debtFilter === "all" ? "primary" : "ghost"}" type="button" data-action="set-debt-filter" data-filter="all">Все</button>
           </div>
-          <button class="button primary" type="button" data-action="open-debt">Новый долг</button>
+          <button class="button primary" type="button" data-action="open-debt">+ Новый долг</button>
         </div>
 
         <section class="debt-layout">
@@ -1318,49 +1450,50 @@
   function renderDebtCard(state, debt) {
     const stats = getDebtStats(state, debt);
     const selected = ui.selectedDebtId === debt.id ? "selected" : "";
-    const statusClass = debt.status === "closed" ? "closed" : "active";
-    const statusLabel = debt.status === "closed" ? "Закрыт" : "Активен";
+    const isClosed = debt.status === "closed";
+    const animation = ui.paymentAnimation?.debtId === debt.id ? ui.paymentAnimation : null;
+    const progressStart = animation ? animation.fromProgress : stats.progress;
+    const history = getSparklinePoints(state, debt);
+    const balanceStart = animation ? animation.fromBalance : stats.balance;
 
     return `
-      <article class="debt-card ${selected}">
+      <article class="debt-card ${selected} ${isClosed ? "is-closed" : ""}" data-debt-card-id="${debt.id}">
         <div class="card-head">
           <div class="card-title">
-            <h3>${escapeHtml(debt.name)}</h3>
-            <div class="meta-line">${escapeHtml(debt.category)} · ${escapeHtml(debt.holder)}</div>
+            <h3 title="${escapeAttribute(debt.name)}">${escapeHtml(debt.name)}</h3>
+            <div class="meta-line" title="${escapeAttribute(debt.holder)}">${escapeHtml(debt.holder)}</div>
           </div>
-          <span class="pill ${statusClass}">${statusLabel}</span>
+          ${isClosed ? '<span class="pill completed">✓ Погашено полностью</span>' : `<span class="pill active">${escapeHtml(debt.category)}</span>`}
         </div>
 
-        <div class="amount-grid">
-          <div>
-            <span>Начальная сумма</span>
-            <strong>${formatMoney(debt.initialAmount)}</strong>
-          </div>
-          <div>
-            <span>Текущий остаток</span>
-            <strong class="${stats.isOverpaid ? "balance-overpaid" : "balance-positive"}">${formatBalance(stats.balance)}</strong>
-          </div>
+        <div class="debt-balance">
+          <span>Сейчас осталось</span>
+          <strong class="${stats.isOverpaid ? "balance-overpaid" : "balance-positive"}" data-animated-balance="${debt.id}" data-balance-from="${balanceStart}" data-balance-to="${stats.balance}">
+            ${formatBalance(animation ? balanceStart : stats.balance)}
+          </strong>
         </div>
 
         ${stats.isOverpaid ? `<span class="pill overpaid">Переплата ${formatMoney(stats.overpayment)}</span>` : ""}
 
-        <div class="progress-block">
-          <div class="progress-label">
-            <span>Погашено</span>
+        <div class="debt-progress-block">
+          <div class="debt-progress-track" aria-label="Погашено ${Math.round(stats.progress)}%">
+            <div class="debt-progress-fill" data-animated-progress="${debt.id}" data-progress-target="${Math.round(stats.progress)}" style="--progress: ${Math.round(progressStart)}%"></div>
             <strong>${Math.round(stats.progress)}%</strong>
           </div>
-          <div class="progress-track" aria-hidden="true">
-            <div class="progress-fill" style="--progress: ${Math.round(stats.progress)}%"></div>
-          </div>
+          <p>Осталось ${formatMoney(stats.owed)} из ${formatMoney(stats.totalOwed)}</p>
+          <p class="paid-label">Погашено ${formatMoney(stats.paidToDebt)}</p>
         </div>
 
+        ${history.length ? `<canvas class="debt-sparkline" width="320" height="60" data-sparkline-points="${history.join(",")}" aria-label="Как уменьшается остаток по долгу"></canvas>` : ""}
+        ${animation ? '<span class="payment-feedback">↓ Платёж учтён</span>' : ""}
         ${debt.note ? `<p class="note">${escapeHtml(debt.note)}</p>` : ""}
 
         <div class="inline-actions">
-          <button class="button small" type="button" data-action="select-debt" data-id="${debt.id}">Операции</button>
-          <button class="button small ghost" type="button" data-action="open-debt" data-id="${debt.id}">Редактировать</button>
+          ${isClosed ? "" : `<button class="button small primary" type="button" data-action="open-entry" data-debt-id="${debt.id}">↓ Добавить платёж</button>`}
+          <button class="button small ghost" type="button" data-action="select-debt" data-id="${debt.id}">Операции</button>
+          <button class="button small ghost" type="button" data-action="open-debt" data-id="${debt.id}">Изменить</button>
           <button class="button small ghost" type="button" data-action="toggle-debt-status" data-id="${debt.id}">
-            ${debt.status === "active" ? "Закрыть" : "Переоткрыть"}
+            ${isClosed ? "Переоткрыть" : "Закрыть"}
           </button>
           <button class="button small danger" type="button" data-action="delete-debt" data-id="${debt.id}">Удалить</button>
         </div>
@@ -1383,7 +1516,7 @@
             <h2>${escapeHtml(debt.name)}</h2>
             <p class="muted">Остаток: ${formatBalance(stats.balance)}</p>
           </div>
-          <button class="button primary" type="button" data-action="open-entry" data-debt-id="${debt.id}">Новая операция</button>
+          <button class="button primary" type="button" data-action="open-entry" data-debt-id="${debt.id}">↓ Добавить платёж</button>
         </div>
 
         <div class="entry-list">
@@ -1399,7 +1532,7 @@
   }
 
   function renderEntryRow(entry) {
-    const label = entry.type === "payment" ? "Платеж" : "Начисление";
+    const label = entry.type === "payment" ? "Платёж" : "Начисление";
     const sign = entry.type === "payment" ? "−" : "+";
     return `
       <article class="entry-row">
@@ -1417,6 +1550,96 @@
         </div>
       </article>
     `;
+  }
+
+  function renderRecentEntries(entries) {
+    return `
+      <section class="recent-operations" aria-label="Последние операции">
+        <div class="section-heading">
+          <div>
+            <span class="section-eyebrow">Чтобы ничего не потерялось</span>
+            <h2>Последние операции</h2>
+          </div>
+          <button class="button ghost" type="button" data-action="set-tab" data-tab="audit">Весь журнал</button>
+        </div>
+        ${entries.length ? `
+          <div class="recent-operations-list">
+            ${entries.map((item) => `
+              <article class="recent-operation">
+                <span class="operation-icon ${item.entry.type}">${item.entry.type === "payment" ? "↓" : "↑"}</span>
+                <div class="recent-operation-copy">
+                  <strong>${escapeHtml(item.debt.name)}</strong>
+                  <span>${escapeHtml(item.debt.holder)} · ${formatHumanDate(item.entry.date)}</span>
+                </div>
+                <strong class="recent-operation-amount ${item.entry.type}">${item.entry.type === "payment" ? "−" : "+"}${formatMoney(item.entry.amount)}</strong>
+              </article>
+            `).join("")}
+          </div>
+        ` : `<p class="recent-empty">Первые платежи и начисления появятся здесь.</p>`}
+      </section>
+    `;
+  }
+
+  function getOverviewProgress(summary) {
+    const total = summary.paidToDebt + summary.activeBalance;
+    return total > 0 ? Math.round((summary.paidToDebt / total) * 100) : 0;
+  }
+
+  function getRecentEntries(state, limit) {
+    const debtsById = new Map(state.debts.map((debt) => [debt.id, debt]));
+
+    return [...state.entries]
+      .sort((left, right) => new Date(right.date) - new Date(left.date))
+      .map((entry) => ({
+        entry,
+        debt: debtsById.get(entry.debtId)
+      }))
+      .filter((item) => item.debt)
+      .slice(0, limit);
+  }
+
+  function getSparklinePoints(state, debt) {
+    const entries = getDebtEntries(state, debt.id)
+      .sort((left, right) => new Date(left.date) - new Date(right.date));
+
+    if (entries.length < 2) {
+      return [];
+    }
+
+    const visibleEntries = [];
+    const points = [getDebtStats({ ...state, entries: visibleEntries }, debt).balance];
+
+    for (const entry of entries) {
+      visibleEntries.push(entry);
+      points.push(getDebtStats({ ...state, entries: visibleEntries }, debt).balance);
+    }
+
+    return points;
+  }
+
+  function formatHumanDate(value) {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) {
+      return "";
+    }
+
+    const today = new Date();
+    const localDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+    const localToday = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    const difference = Math.round((localToday - localDate) / 86400000);
+
+    if (difference === 0) {
+      return "сегодня";
+    }
+
+    if (difference === 1) {
+      return "вчера";
+    }
+
+    return new Intl.DateTimeFormat("ru-RU", {
+      day: "numeric",
+      month: "long"
+    }).format(date);
   }
 
   function renderAnalytics(state) {
@@ -1692,8 +1915,8 @@
     return `
       <form data-form="debt" data-id="${debt?.id || ""}">
         <div class="field-grid">
-          ${field("name", "Название", values.name, "text", true)}
-          ${field("initialAmount", "Начальная сумма, ₽", values.initialAmount, "number", true)}
+          ${field("name", "Название долга", values.name, "text", true, "Например, кредит на ремонт")}
+          ${field("initialAmount", "Сколько было взято, ₽", values.initialAmount, "number", true, "Например, 150 000")}
         </div>
         <div class="field-grid">
           ${selectWithNew("category", "Категория", values.category, state.dictionaries.categories, "newCategory", "Новая категория")}
@@ -1710,7 +1933,7 @@
         </div>
         <div class="field">
           <label for="debt-note">Заметка</label>
-          <textarea id="debt-note" name="note">${escapeHtml(values.note || "")}</textarea>
+          <textarea id="debt-note" name="note" placeholder="Например, платить до 25 числа">${escapeHtml(values.note || "")}</textarea>
         </div>
         <div class="modal-actions">
           <button class="button ghost" type="button" data-action="close-modal">Отмена</button>
@@ -1741,20 +1964,21 @@
             </select>
           </div>
           <div class="field">
-            <label for="entry-type">Тип</label>
+            <label for="entry-type">Что произошло?</label>
             <select id="entry-type" name="type" required>
-              <option value="payment" ${values.type === "payment" ? "selected" : ""}>Платеж</option>
-              <option value="charge" ${values.type === "charge" ? "selected" : ""}>Начисление</option>
+              <option value="payment" ${values.type === "payment" ? "selected" : ""}>Платёж - уменьшает долг</option>
+              <option value="charge" ${values.type === "charge" ? "selected" : ""}>Начисление - увеличивает сумму</option>
             </select>
+            <span class="field-hint">Платёж уменьшает долг. Начисление - это проценты или новый долг.</span>
           </div>
         </div>
         <div class="field-grid">
-          ${field("amount", "Сумма, ₽", values.amount, "number", true)}
+          ${field("amount", "Сумма, ₽", values.amount, "number", true, "Например, 10 000")}
           ${field("date", "Дата", toDateInputValue(values.date), "date", true)}
         </div>
         <div class="field">
           <label for="entry-comment">Комментарий</label>
-          <textarea id="entry-comment" name="comment">${escapeHtml(values.comment || "")}</textarea>
+          <textarea id="entry-comment" name="comment" placeholder="Например, платёж за июнь">${escapeHtml(values.comment || "")}</textarea>
         </div>
         <div class="modal-actions">
           <button class="button ghost" type="button" data-action="close-modal">Отмена</button>
@@ -1883,6 +2107,10 @@
       if (tokenInput) {
         tokenInput.type = target.checked ? "text" : "password";
       }
+    } else if (target.dataset.action === "toggle-large-text") {
+      ui.largeText = target.checked;
+      localStorage.setItem("debt-tracker-large-text-v1", String(ui.largeText));
+      applyLargeTextPreference();
     }
   }
 
@@ -1908,15 +2136,26 @@
   }
 
   function submitEntry(form) {
-    run(() => {
+    try {
       const data = Object.fromEntries(new FormData(form).entries());
       const id = form.dataset.id;
+      const debt = getState().debts.find((item) => item.id === data.debtId);
+      const beforeStats = !id && data.type === "payment" && debt ? getDebtStats(getState(), debt) : null;
       const entry = id ? updateEntry(id, data) : addEntry(data);
+      if (beforeStats && entry.type === "payment") {
+        ui.paymentAnimation = {
+          debtId: entry.debtId,
+          fromBalance: beforeStats.balance,
+          fromProgress: beforeStats.progress
+        };
+      }
       ui.selectedDebtId = entry.debtId;
       ui.modal = null;
       toast(id ? "Операция обновлена" : "Операция добавлена", "success");
       offerCloseIfNeeded(entry.debtId);
-    });
+    } catch (error) {
+      toast(error.message || "Операция не добавлена", "error");
+    }
   }
 
   function submitDictionary(form) {
@@ -2162,11 +2401,11 @@
     });
   }
 
-  function field(name, label, value = "", type = "text", required = false) {
+  function field(name, label, value = "", type = "text", required = false, placeholder = "") {
     return `
       <div class="field">
         <label for="${name}">${label}</label>
-        <input id="${name}" name="${name}" type="${type}" value="${escapeAttribute(value)}" ${required ? "required" : ""} ${type === "number" ? "min=\"1\" step=\"1\"" : ""}>
+        <input id="${name}" name="${name}" type="${type}" value="${escapeAttribute(value)}" placeholder="${escapeAttribute(placeholder)}" ${required ? "required" : ""} ${type === "number" ? "min=\"1\" step=\"1\"" : ""}>
       </div>
     `;
   }
@@ -2182,7 +2421,7 @@
             `).join("")}
           </select>
         </div>
-        ${field(newName, newLabel)}
+        ${field(newName, newLabel, "", "text", false, `Или введите ${newLabel.toLocaleLowerCase("ru-RU")}`)}
       </div>
     `;
   }
