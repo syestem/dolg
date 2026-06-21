@@ -24,7 +24,10 @@ const FIELD_LABELS = {
   value: "Значение",
   mode: "Режим",
   path: "Путь",
-  repo: "Репозиторий"
+  repo: "Репозиторий",
+  enabled: "Синхронизация",
+  privacyAcknowledged: "Подтверждение риска",
+  token: "Токен"
 };
 
 const STATUS_LABELS = {

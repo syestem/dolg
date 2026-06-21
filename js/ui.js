@@ -22,6 +22,7 @@ import {
   getState,
   getSyncSettings,
   importStateFromJson,
+  removeSyncToken,
   recordGithubAction,
   renameDictionaryItem,
   saveSyncSettings,
@@ -30,7 +31,11 @@ import {
   updateDebt,
   updateEntry
 } from "./state.js";
-import { fetchGithubData, pushGithubData } from "./github.js";
+import {
+  fetchGithubData,
+  getGithubRepositoryInfo,
+  pushGithubData
+} from "./github.js";
 
 const ui = {
   tab: "debts",
@@ -41,7 +46,8 @@ const ui = {
   modal: null,
   toast: null,
   importMode: "replace",
-  syncStatus: ""
+  syncStatus: "",
+  syncStatusType: ""
 };
 
 let root;
@@ -100,8 +106,12 @@ function renderSummary(state) {
         <strong>${formatMoney(summary.activeBalance)}</strong>
       </article>
       <article class="metric-card">
-        <span>Суммарно выплачено</span>
+        <span>Выплачено всего</span>
         <strong>${formatMoney(summary.totalPaid)}</strong>
+      </article>
+      <article class="metric-card">
+        <span>Выплачено в счёт долга</span>
+        <strong>${formatMoney(summary.paidToDebt)}</strong>
       </article>
       <article class="metric-card">
         <span>Активных долгов</span>
@@ -222,6 +232,8 @@ function renderDebtCard(state, debt) {
         </div>
       </div>
 
+      ${stats.isOverpaid ? `<span class="pill overpaid">Переплата ${formatMoney(stats.overpayment)}</span>` : ""}
+
       <div class="progress-block">
         <div class="progress-label">
           <span>Погашено</span>
@@ -309,6 +321,8 @@ function renderAnalytics(state) {
 }
 
 function renderAnalyticsPanel(title, rows) {
+  const hasOverpayment = rows.some((row) => row.overpayment > 0);
+
   return `
     <section class="panel">
       <div class="panel-head">
@@ -322,6 +336,7 @@ function renderAnalyticsPanel(title, rows) {
               <th>Активные</th>
               <th>Остаток</th>
               <th>Выплачено</th>
+              ${hasOverpayment ? "<th>Переплата</th>" : ""}
             </tr>
           </thead>
           <tbody>
@@ -341,6 +356,7 @@ function renderAnalyticsPanel(title, rows) {
                     <span class="bar-track"><span class="bar-fill paid" style="--bar: ${row.paidPercent}%"></span></span>
                   </div>
                 </td>
+                ${hasOverpayment ? `<td>${row.overpayment ? formatMoney(row.overpayment) : "—"}</td>` : ""}
               </tr>
             `).join("")}
           </tbody>
@@ -405,6 +421,8 @@ function renderAuditRow(record, query) {
 
 function renderSettings(state) {
   const sync = getSyncSettings();
+  const syncActionsDisabled = !sync.enabled || !sync.privacyAcknowledged;
+
   return `
     <main class="tab-panel">
       <section class="settings-grid">
@@ -433,10 +451,18 @@ function renderSettings(state) {
         <div class="panel-head">
           <h2>GitHub-синхронизация</h2>
         </div>
+        <div class="privacy-callout" role="note">
+          <strong>Важно о приватности</strong>
+          <p>Синхронизируйте только в приватный репозиторий. В публичном репозитории файл data.json с вашими долгами будет доступен всем. Секретность ссылки не защищает данные.</p>
+        </div>
         <form data-form="sync-settings">
           <label class="checkbox-field">
-            <input type="checkbox" name="enabled" ${sync.enabled ? "checked" : ""}>
+            <input type="checkbox" name="enabled" data-action="sync-enabled" ${sync.enabled ? "checked" : ""}>
             <span>Включить синхронизацию</span>
+          </label>
+          <label class="checkbox-field privacy-confirmation">
+            <input type="checkbox" name="privacyAcknowledged" data-action="sync-risk-ack" ${sync.privacyAcknowledged ? "checked" : ""}>
+            <span>Я понимаю риск и использую приватный репозиторий</span>
           </label>
           <div class="field-grid">
             ${field("owner", "Owner", sync.owner)}
@@ -445,16 +471,24 @@ function renderSettings(state) {
             ${field("path", "Путь к data.json", sync.path || "data.json")}
           </div>
           <div class="field">
-            <label for="sync-token">Personal Access Token</label>
+            <label for="sync-token">
+              Personal Access Token
+              <span class="field-hint">Используйте fine-grained PAT только для нужного репозитория: Contents read/write и короткий срок жизни.</span>
+            </label>
             <input id="sync-token" name="token" type="password" autocomplete="off" value="${escapeAttribute(sync.token)}">
+            <label class="checkbox-field token-visibility-toggle">
+              <input type="checkbox" data-action="toggle-token-visibility">
+              <span>Показать токен</span>
+            </label>
           </div>
           <div class="settings-actions">
             <button class="button primary" type="submit">Сохранить настройки</button>
-            <button class="button ghost" type="button" data-action="github-load">Загрузить из GitHub</button>
-            <button class="button ghost" type="button" data-action="github-save">Сохранить в GitHub</button>
+            <button class="button ghost" type="button" data-action="github-load" data-sync-action ${syncActionsDisabled ? "disabled" : ""}>Загрузить из GitHub</button>
+            <button class="button ghost" type="button" data-action="github-save" data-sync-action ${syncActionsDisabled ? "disabled" : ""}>Сохранить в GitHub</button>
+            <button class="button danger" type="button" data-action="remove-sync-token">Удалить токен из браузера</button>
           </div>
         </form>
-        ${ui.syncStatus ? `<div class="sync-status">${escapeHtml(ui.syncStatus)}</div>` : ""}
+        ${ui.syncStatus ? `<div class="sync-status ${ui.syncStatusType}">${escapeHtml(ui.syncStatus)}</div>` : ""}
       </section>
     </main>
   `;
@@ -698,6 +732,8 @@ function handleClick(event) {
     loadFromGithub();
   } else if (action === "github-save") {
     saveToGithub();
+  } else if (action === "remove-sync-token") {
+    removeTokenFromBrowser();
   }
 }
 
@@ -730,6 +766,13 @@ function handleChange(event) {
     ui.importMode = target.value;
   } else if (target.dataset.action === "import-file") {
     importFile(target.files?.[0]);
+  } else if (target.dataset.action === "sync-enabled" || target.dataset.action === "sync-risk-ack") {
+    updateSyncActionAvailability(target.form);
+  } else if (target.dataset.action === "toggle-token-visibility") {
+    const tokenInput = target.form?.elements.token;
+    if (tokenInput) {
+      tokenInput.type = target.checked ? "text" : "password";
+    }
   }
 }
 
@@ -774,14 +817,23 @@ function submitDictionary(form) {
   });
 }
 
-function submitSyncSettings(form) {
-  run(() => {
+async function submitSyncSettings(form) {
+  try {
     const data = Object.fromEntries(new FormData(form).entries());
     data.enabled = Boolean(form.elements.enabled.checked);
-    saveSyncSettings(data);
-    ui.syncStatus = "Настройки сохранены локально.";
+    data.privacyAcknowledged = Boolean(form.elements.privacyAcknowledged.checked);
+    const settings = saveSyncSettings(data);
+
+    if (settings.enabled) {
+      await inspectGithubRepositoryPrivacy(settings);
+    } else {
+      setSyncStatus("Настройки сохранены локально. Синхронизация выключена.");
+    }
+
     toast("Настройки синхронизации сохранены", "success");
-  });
+  } catch (error) {
+    toast(error.message || "Не удалось сохранить настройки синхронизации", "error");
+  }
 }
 
 function confirmDeleteDebt(id) {
@@ -894,46 +946,110 @@ async function importFile(file) {
 }
 
 async function loadFromGithub() {
-  if (!confirm("Загрузить состояние из GitHub и заменить локальные данные?")) {
-    return;
-  }
-
   try {
+    const settings = requireSyncAuthorization();
+    if (!confirm("Загрузить состояние из GitHub и заменить локальные данные?")) {
+      return;
+    }
+
     ui.syncStatus = "Загрузка из GitHub...";
+    ui.syncStatusType = "";
     render();
-    const { data } = await fetchGithubData(getSyncSettings());
+    const { data } = await fetchGithubData(settings);
     importStateFromJson(data, "replace", "GitHub");
     recordGithubAction("Данные загружены из GitHub", [
       { field: "mode", label: "Режим", before: "локальное состояние", after: "замена из GitHub" }
     ]);
-    ui.syncStatus = "Данные загружены из GitHub.";
+    setSyncStatus("Данные загружены из GitHub.", "good");
     toast("Синхронизация выполнена", "success");
   } catch (error) {
-    ui.syncStatus = error.message || "Ошибка загрузки из GitHub";
+    setSyncStatus(error.message || "Ошибка загрузки из GitHub", "bad");
     toast(ui.syncStatus, "error");
-    render();
   }
 }
 
 async function saveToGithub() {
-  if (!confirm("Сохранить текущее состояние в GitHub data.json?")) {
+  try {
+    const settings = requireSyncAuthorization();
+    const repositoryPrivacy = await inspectGithubRepositoryPrivacy(settings);
+    render();
+
+    const confirmationMessage = repositoryPrivacy === "public"
+      ? "Внимание: GitHub сообщает, что репозиторий публичный. Файл data.json с вашими долгами будет доступен всем. Продолжить сохранение?"
+      : "Сохранить текущее состояние в GitHub data.json?";
+    if (!confirm(confirmationMessage)) {
+      return;
+    }
+
+    ui.syncStatus = "Сохранение в GitHub...";
+    ui.syncStatusType = "";
+    render();
+    await pushGithubData(settings, getState());
+    recordGithubAction("Данные сохранены в GitHub", [
+      { field: "path", label: "Путь", before: "локальное состояние", after: settings.path }
+    ]);
+    setSyncStatus("Данные сохранены в GitHub.", "good");
+    toast("Данные сохранены в GitHub", "success");
+  } catch (error) {
+    setSyncStatus(error.message || "Ошибка сохранения в GitHub", "bad");
+    toast(ui.syncStatus, "error");
+  }
+}
+
+function removeTokenFromBrowser() {
+  if (!confirm("Удалить сохраненный токен GitHub только из этого браузера?")) {
     return;
   }
 
-  try {
-    ui.syncStatus = "Сохранение в GitHub...";
-    render();
-    await pushGithubData(getSyncSettings(), getState());
-    recordGithubAction("Данные сохранены в GitHub", [
-      { field: "path", label: "Путь", before: "локальное состояние", after: getSyncSettings().path }
-    ]);
-    ui.syncStatus = "Данные сохранены в GitHub.";
-    toast("Данные сохранены в GitHub", "success");
-  } catch (error) {
-    ui.syncStatus = error.message || "Ошибка сохранения в GitHub";
-    toast(ui.syncStatus, "error");
-    render();
+  run(() => {
+    const hadToken = removeSyncToken();
+    setSyncStatus(hadToken ? "Токен удален из браузера." : "Сохраненного токена в браузере не было.");
+    toast(hadToken ? "Токен удален из браузера" : "Сохраненного токена нет", "success");
+  });
+}
+
+function requireSyncAuthorization() {
+  const settings = getSyncSettings();
+  if (!settings.enabled || !settings.privacyAcknowledged) {
+    throw new Error("Включите синхронизацию и подтвердите использование приватного репозитория");
   }
+
+  return settings;
+}
+
+async function inspectGithubRepositoryPrivacy(settings) {
+  try {
+    const repository = await getGithubRepositoryInfo(settings);
+    if (repository.private) {
+      setSyncStatus("GitHub подтвердил: репозиторий приватный.", "good");
+      return "private";
+    }
+
+    setSyncStatus("Внимание: GitHub сообщает, что репозиторий публичный. Не сохраняйте в него data.json с личными долгами.", "bad");
+    return "public";
+  } catch {
+    setSyncStatus("Не удалось определить видимость репозитория. Синхронизация остается доступной.", "");
+    return "unknown";
+  }
+}
+
+function setSyncStatus(message, type = "") {
+  ui.syncStatus = message;
+  ui.syncStatusType = type;
+}
+
+function updateSyncActionAvailability(form) {
+  if (!form) {
+    return;
+  }
+
+  const enabled = Boolean(form.elements.enabled?.checked);
+  const acknowledged = Boolean(form.elements.privacyAcknowledged?.checked);
+  const savedSettings = getSyncSettings();
+  const savedAuthorization = savedSettings.enabled && savedSettings.privacyAcknowledged;
+  form.querySelectorAll("[data-sync-action]").forEach((button) => {
+    button.disabled = !enabled || !acknowledged || !savedAuthorization;
+  });
 }
 
 function field(name, label, value = "", type = "text", required = false) {

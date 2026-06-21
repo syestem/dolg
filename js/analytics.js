@@ -86,17 +86,22 @@ export function getDebtStats(state, debt) {
   const charged = entries
     .filter((entry) => entry.type === "charge")
     .reduce((sum, entry) => sum + Number(entry.amount || 0), 0);
-  const balance = Number(debt.initialAmount || 0) - paid + charged;
+  const totalOwed = Number(debt.initialAmount || 0) + charged;
+  const balance = totalOwed - paid;
   const owed = Math.max(balance, 0);
-  const initial = Number(debt.initialAmount || 0);
-  const progress = initial <= 0 ? 0 : clamp(((initial - Math.max(balance, 0)) / initial) * 100, 0, 100);
+  const overpayment = Math.max(-balance, 0);
+  const paidToDebt = totalOwed <= 0 ? 0 : Math.min(paid, totalOwed);
+  const progress = totalOwed <= 0 ? 0 : balance < 0 ? 100 : clamp((paid / totalOwed) * 100, 0, 100);
 
   return {
     entries,
     paid,
     charged,
+    totalOwed,
+    paidToDebt,
     balance,
     owed,
+    overpayment,
     progress,
     isOverpaid: balance < 0
   };
@@ -110,6 +115,8 @@ export function getSummary(state) {
   const totalPaid = (state.entries || [])
     .filter((entry) => entry.type === "payment")
     .reduce((sum, entry) => sum + Number(entry.amount || 0), 0);
+  const paidToDebt = debts
+    .reduce((sum, debt) => sum + getDebtStats(state, debt).paidToDebt, 0);
   const currentMonthPaid = (state.entries || [])
     .filter((entry) => entry.type === "payment" && isCurrentMonth(entry.date))
     .reduce((sum, entry) => sum + Number(entry.amount || 0), 0);
@@ -117,6 +124,7 @@ export function getSummary(state) {
   return {
     activeBalance,
     totalPaid,
+    paidToDebt,
     currentMonthPaid,
     activeCount: activeDebts.length,
     closedCount: closedDebts.length
@@ -135,6 +143,8 @@ export function getAnalyticsGroups(state, dimension) {
       activeCount: 0,
       balance: 0,
       paid: 0,
+      paidToDebt: 0,
+      overpayment: 0,
       charged: 0,
       initial: 0
     };
@@ -143,6 +153,8 @@ export function getAnalyticsGroups(state, dimension) {
     current.activeCount += debt.status === "active" ? 1 : 0;
     current.balance += debt.status === "active" ? stats.owed : 0;
     current.paid += stats.paid;
+    current.paidToDebt += stats.paidToDebt;
+    current.overpayment += stats.overpayment;
     current.charged += stats.charged;
     current.initial += Number(debt.initialAmount || 0);
     groups.set(key, current);

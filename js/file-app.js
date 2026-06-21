@@ -12,7 +12,7 @@
     github: "GitHub",
     sync: "Синхронизация"
   };
-  
+
   const FIELD_LABELS = {
     name: "Название",
     category: "Категория",
@@ -29,19 +29,22 @@
     value: "Значение",
     mode: "Режим",
     path: "Путь",
-    repo: "Репозиторий"
+    repo: "Репозиторий",
+    enabled: "Синхронизация",
+    privacyAcknowledged: "Подтверждение риска",
+    token: "Токен"
   };
-  
+
   const STATUS_LABELS = {
     active: "Активный",
     closed: "Закрытый"
   };
-  
+
   const TYPE_LABELS = {
     payment: "Платеж",
     charge: "Начисление"
   };
-  
+
   function createAuditRecord({ id, timestamp, action, entityType, entityId, details }) {
     return {
       id,
@@ -52,7 +55,7 @@
       details: normalizeDetails(details)
     };
   }
-  
+
   function describeChanges(before, after, fields = Object.keys(after || {})) {
     return fields
       .filter((field) => !sameValue(before?.[field], after?.[field]))
@@ -63,7 +66,7 @@
         after: prepareValue(field, after?.[field])
       }));
   }
-  
+
   function describeCreated(entity, fields = Object.keys(entity || {})) {
     return fields
       .filter((field) => entity?.[field] !== undefined && entity?.[field] !== "")
@@ -74,7 +77,7 @@
         after: prepareValue(field, entity[field])
       }));
   }
-  
+
   function describeDeleted(entity, fields = Object.keys(entity || {})) {
     return fields
       .filter((field) => entity?.[field] !== undefined && entity?.[field] !== "")
@@ -85,36 +88,36 @@
         after: "удалено"
       }));
   }
-  
+
   function formatAuditDetails(details) {
     if (!details) {
       return "";
     }
-  
+
     if (typeof details === "string") {
       return details;
     }
-  
+
     if (Array.isArray(details)) {
       return details
         .map((item) => `${item.label || item.field}: ${stringifyDetail(item.before)} → ${stringifyDetail(item.after)}`)
         .join("\n");
     }
-  
+
     return Object.entries(details)
       .map(([key, value]) => `${FIELD_LABELS[key] || key}: ${stringifyDetail(value)}`)
       .join("\n");
   }
-  
+
   function normalizeDetails(details) {
     if (Array.isArray(details) || typeof details === "string") {
       return details;
     }
-  
+
     if (!details || typeof details !== "object") {
       return "";
     }
-  
+
     return Object.entries(details).map(([field, value]) => ({
       field,
       label: FIELD_LABELS[field] || field,
@@ -122,55 +125,55 @@
       after: prepareValue(field, value)
     }));
   }
-  
+
   function prepareValue(field, value) {
     if (value === undefined || value === null || value === "") {
       return "пусто";
     }
-  
+
     if (field === "status") {
       return STATUS_LABELS[value] || value;
     }
-  
+
     if (field === "type") {
       return TYPE_LABELS[value] || value;
     }
-  
+
     if (field === "initialAmount" || field === "amount") {
       return Number(value).toLocaleString("ru-RU") + " ₽";
     }
-  
+
     return value;
   }
-  
+
   function stringifyDetail(value) {
     if (value === undefined || value === null || value === "") {
       return "пусто";
     }
-  
+
     if (typeof value === "object") {
       return JSON.stringify(value);
     }
-  
+
     return String(value);
   }
-  
+
   function sameValue(left, right) {
     return JSON.stringify(left ?? "") === JSON.stringify(right ?? "");
   }
-  
+
 
   // js/analytics.js
   const RUB_FORMATTER = new Intl.NumberFormat("ru-RU", {
     maximumFractionDigits: 0
   });
-  
+
   const DATE_FORMATTER = new Intl.DateTimeFormat("ru-RU", {
     day: "2-digit",
     month: "2-digit",
     year: "numeric"
   });
-  
+
   const DATE_TIME_FORMATTER = new Intl.DateTimeFormat("ru-RU", {
     day: "2-digit",
     month: "2-digit",
@@ -178,69 +181,69 @@
     hour: "2-digit",
     minute: "2-digit"
   });
-  
+
   function formatMoney(value) {
     const number = Number(value) || 0;
     const sign = number < 0 ? "-" : "";
     return `${sign}${RUB_FORMATTER.format(Math.abs(Math.round(number)))} ₽`;
   }
-  
+
   function formatBalance(value) {
     const number = Number(value) || 0;
     if (number < 0) {
       return `Переплата ${formatMoney(Math.abs(number))}`;
     }
-  
+
     return formatMoney(number);
   }
-  
+
   function formatDate(value) {
     if (!value) {
       return "";
     }
-  
+
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) {
       return "";
     }
-  
+
     return DATE_FORMATTER.format(date);
   }
-  
+
   function formatDateTime(value) {
     if (!value) {
       return "";
     }
-  
+
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) {
       return "";
     }
-  
+
     return DATE_TIME_FORMATTER.format(date);
   }
-  
+
   function todayInputValue() {
     return new Date().toISOString().slice(0, 10);
   }
-  
+
   function toDateInputValue(value) {
     if (!value) {
       return todayInputValue();
     }
-  
+
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) {
       return todayInputValue();
     }
-  
+
     return date.toISOString().slice(0, 10);
   }
-  
+
   function getDebtEntries(state, debtId) {
     return state.entries.filter((entry) => entry.debtId === debtId);
   }
-  
+
   function getDebtStats(state, debt) {
     const entries = getDebtEntries(state, debt.id);
     const paid = entries
@@ -249,22 +252,27 @@
     const charged = entries
       .filter((entry) => entry.type === "charge")
       .reduce((sum, entry) => sum + Number(entry.amount || 0), 0);
-    const balance = Number(debt.initialAmount || 0) - paid + charged;
+    const totalOwed = Number(debt.initialAmount || 0) + charged;
+    const balance = totalOwed - paid;
     const owed = Math.max(balance, 0);
-    const initial = Number(debt.initialAmount || 0);
-    const progress = initial <= 0 ? 0 : clamp(((initial - Math.max(balance, 0)) / initial) * 100, 0, 100);
-  
+    const overpayment = Math.max(-balance, 0);
+    const paidToDebt = totalOwed <= 0 ? 0 : Math.min(paid, totalOwed);
+    const progress = totalOwed <= 0 ? 0 : balance < 0 ? 100 : clamp((paid / totalOwed) * 100, 0, 100);
+
     return {
       entries,
       paid,
       charged,
+      totalOwed,
+      paidToDebt,
       balance,
       owed,
+      overpayment,
       progress,
       isOverpaid: balance < 0
     };
   }
-  
+
   function getSummary(state) {
     const debts = state.debts || [];
     const activeDebts = debts.filter((debt) => debt.status === "active");
@@ -273,22 +281,25 @@
     const totalPaid = (state.entries || [])
       .filter((entry) => entry.type === "payment")
       .reduce((sum, entry) => sum + Number(entry.amount || 0), 0);
+    const paidToDebt = debts
+      .reduce((sum, debt) => sum + getDebtStats(state, debt).paidToDebt, 0);
     const currentMonthPaid = (state.entries || [])
       .filter((entry) => entry.type === "payment" && isCurrentMonth(entry.date))
       .reduce((sum, entry) => sum + Number(entry.amount || 0), 0);
-  
+
     return {
       activeBalance,
       totalPaid,
+      paidToDebt,
       currentMonthPaid,
       activeCount: activeDebts.length,
       closedCount: closedDebts.length
     };
   }
-  
+
   function getAnalyticsGroups(state, dimension) {
     const groups = new Map();
-  
+
     for (const debt of state.debts || []) {
       const key = debt[dimension] || "Без значения";
       const stats = getDebtStats(state, debt);
@@ -298,83 +309,87 @@
         activeCount: 0,
         balance: 0,
         paid: 0,
+        paidToDebt: 0,
+        overpayment: 0,
         charged: 0,
         initial: 0
       };
-  
+
       current.debtCount += 1;
       current.activeCount += debt.status === "active" ? 1 : 0;
       current.balance += debt.status === "active" ? stats.owed : 0;
       current.paid += stats.paid;
+      current.paidToDebt += stats.paidToDebt;
+      current.overpayment += stats.overpayment;
       current.charged += stats.charged;
       current.initial += Number(debt.initialAmount || 0);
       groups.set(key, current);
     }
-  
+
     const rows = Array.from(groups.values()).sort((left, right) => right.balance - left.balance || right.paid - left.paid);
     const maxBalance = Math.max(1, ...rows.map((row) => row.balance));
     const maxPaid = Math.max(1, ...rows.map((row) => row.paid));
-  
+
     return rows.map((row) => ({
       ...row,
       balancePercent: Math.round((row.balance / maxBalance) * 100),
       paidPercent: Math.round((row.paid / maxPaid) * 100)
     }));
   }
-  
+
   function isCurrentMonth(value) {
     if (!value) {
       return false;
     }
-  
+
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) {
       return false;
     }
-  
+
     const now = new Date();
     return date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth();
   }
-  
+
   function clamp(value, min, max) {
     return Math.min(max, Math.max(min, value));
   }
-  
+
 
   // js/state.js
-  
+
   const STORAGE_KEY = "debt-tracker-state-v1";
   const SYNC_SETTINGS_KEY = "debt-tracker-github-sync-v1";
-  
+
   const DEFAULT_DICTIONARIES = {
     categories: ["Кредитная карта", "Потребительский кредит", "Рассрочка", "Займ"],
     holders: ["Сбербанк", "Т-Банк", "Альфа-Банк"]
   };
-  
+
   let state = loadState();
   const listeners = new Set();
-  
+
   function getState() {
     return state;
   }
-  
+
   function subscribe(listener) {
     listeners.add(listener);
     return () => listeners.delete(listener);
   }
-  
+
   function saveNow() {
     saveState();
     notify();
   }
-  
+
   function getSyncSettings() {
     try {
       const raw = localStorage.getItem(SYNC_SETTINGS_KEY);
       if (!raw) {
         return defaultSyncSettings();
       }
-  
+
       return {
         ...defaultSyncSettings(),
         ...JSON.parse(raw)
@@ -383,36 +398,83 @@
       return defaultSyncSettings();
     }
   }
-  
+
   function saveSyncSettings(settings) {
+    const previous = getSyncSettings();
     const clean = {
       enabled: Boolean(settings.enabled),
+      privacyAcknowledged: Boolean(settings.privacyAcknowledged),
       owner: cleanText(settings.owner),
       repo: cleanText(settings.repo),
       branch: cleanText(settings.branch) || "main",
       path: cleanText(settings.path) || "data.json",
       token: cleanText(settings.token)
     };
-  
+
+    if (clean.enabled && !clean.privacyAcknowledged) {
+      throw new Error("Подтвердите, что используете приватный репозиторий, перед включением синхронизации");
+    }
+
     localStorage.setItem(SYNC_SETTINGS_KEY, JSON.stringify(clean));
     pushAudit("Настройки GitHub-синхронизации изменены", "github", "settings", [
-      { field: "repo", label: "Репозиторий", before: "прежние настройки", after: `${clean.owner}/${clean.repo}` },
-      { field: "path", label: "Путь", before: "прежний путь", after: clean.path },
-      { field: "enabled", label: "Синхронизация", before: "прежний режим", after: clean.enabled ? "включена" : "выключена" }
+      {
+        field: "repo",
+        label: "Репозиторий",
+        before: syncRepositoryLabel(previous),
+        after: syncRepositoryLabel(clean)
+      },
+      { field: "path", label: "Путь", before: previous.path, after: clean.path },
+      {
+        field: "enabled",
+        label: "Синхронизация",
+        before: previous.enabled ? "включена" : "выключена",
+        after: clean.enabled ? "включена" : "выключена"
+      },
+      {
+        field: "privacyAcknowledged",
+        label: "Подтверждение риска",
+        before: previous.privacyAcknowledged ? "подтверждено" : "не подтверждено",
+        after: clean.privacyAcknowledged ? "подтверждено" : "не подтверждено"
+      },
+      {
+        field: "token",
+        label: "Токен",
+        before: previous.token ? "сохранен" : "не сохранен",
+        after: clean.token ? "сохранен" : "не сохранен"
+      }
     ]);
     commit();
     return clean;
   }
-  
+
+  function removeSyncToken() {
+    const settings = getSyncSettings();
+    const hadToken = Boolean(settings.token);
+    localStorage.setItem(SYNC_SETTINGS_KEY, JSON.stringify({
+      ...settings,
+      token: ""
+    }));
+    pushAudit("Токен GitHub удален из браузера", "github", "settings", [
+      {
+        field: "token",
+        label: "Токен",
+        before: hadToken ? "сохранен" : "не сохранен",
+        after: "удален"
+      }
+    ]);
+    commit();
+    return hadToken;
+  }
+
   function exportState() {
     return JSON.stringify(state, null, 2);
   }
-  
+
   function addDebt(input) {
     const debt = normalizeDebtInput(input);
     ensureDictionaryValue("categories", debt.category, "category");
     ensureDictionaryValue("holders", debt.holder, "holder");
-  
+
     state.debts.unshift(debt);
     pushAudit("Создан долг", "debt", debt.id, describeCreated(debt, [
       "name",
@@ -426,16 +488,16 @@
     commit();
     return debt;
   }
-  
+
   function updateDebt(id, input) {
     const debt = findById(state.debts, id, "Долг не найден");
     const before = { ...debt };
     const next = normalizeDebtInput({ ...debt, ...input }, id, debt.createdAt);
-  
+
     ensureDictionaryValue("categories", next.category, "category");
     ensureDictionaryValue("holders", next.holder, "holder");
     Object.assign(debt, next);
-  
+
     const details = describeChanges(before, debt, [
       "name",
       "category",
@@ -444,21 +506,21 @@
       "note",
       "status"
     ]);
-  
+
     if (details.length) {
       pushAudit("Изменен долг", "debt", debt.id, details);
       commit();
     }
-  
+
     return debt;
   }
-  
+
   function deleteDebt(id) {
     const debtIndex = state.debts.findIndex((debt) => debt.id === id);
     if (debtIndex === -1) {
       throw new Error("Долг не найден");
     }
-  
+
     const [debt] = state.debts.splice(debtIndex, 1);
     const removedEntries = state.entries.filter((entry) => entry.debtId === id);
     state.entries = state.entries.filter((entry) => entry.debtId !== id);
@@ -468,24 +530,24 @@
     ]);
     commit();
   }
-  
+
   function setDebtStatus(id, status) {
     if (!["active", "closed"].includes(status)) {
       throw new Error("Неизвестный статус долга");
     }
-  
+
     const debt = findById(state.debts, id, "Долг не найден");
     if (debt.status === status) {
       return debt;
     }
-  
+
     const before = { ...debt };
     debt.status = status;
     pushAudit(status === "closed" ? "Долг закрыт" : "Долг переоткрыт", "debt", id, describeChanges(before, debt, ["status"]));
     commit();
     return debt;
   }
-  
+
   function addEntry(input) {
     const entry = normalizeEntryInput(input);
     findById(state.debts, entry.debtId, "Долг для операции не найден");
@@ -500,29 +562,29 @@
     commit();
     return entry;
   }
-  
+
   function updateEntry(id, input) {
     const entry = findById(state.entries, id, "Операция не найдена");
     const before = { ...entry };
     const next = normalizeEntryInput({ ...entry, ...input }, id);
     findById(state.debts, next.debtId, "Долг для операции не найден");
     Object.assign(entry, next);
-  
+
     const details = describeChanges(before, entry, ["debtId", "type", "amount", "date", "comment"]);
     if (details.length) {
       pushAudit("Изменена операция", "entry", entry.id, details);
       commit();
     }
-  
+
     return entry;
   }
-  
+
   function deleteEntry(id) {
     const index = state.entries.findIndex((entry) => entry.id === id);
     if (index === -1) {
       throw new Error("Операция не найдена");
     }
-  
+
     const [entry] = state.entries.splice(index, 1);
     pushAudit("Удалена операция", "entry", id, describeDeleted(entry, [
       "debtId",
@@ -533,14 +595,14 @@
     ]));
     commit();
   }
-  
+
   function addDictionaryItem(kind, value) {
     const list = getDictionary(kind);
     const clean = requireText(value, kind === "categories" ? "Категория" : "Банк/удержатель");
     if (containsValue(list, clean)) {
       throw new Error("Такое значение уже есть в справочнике");
     }
-  
+
     list.push(clean);
     list.sort((a, b) => a.localeCompare(b, "ru"));
     pushAudit("Добавлен элемент справочника", dictionaryEntityType(kind), clean, [
@@ -549,7 +611,7 @@
     commit();
     return clean;
   }
-  
+
   function renameDictionaryItem(kind, oldValue, newValue) {
     const list = getDictionary(kind);
     const oldClean = requireText(oldValue, "Текущее значение");
@@ -558,53 +620,53 @@
     if (index === -1) {
       throw new Error("Элемент справочника не найден");
     }
-  
+
     if (!sameText(oldClean, nextClean) && containsValue(list, nextClean)) {
       throw new Error("Такое значение уже есть в справочнике");
     }
-  
+
     list[index] = nextClean;
     list.sort((a, b) => a.localeCompare(b, "ru"));
-  
+
     const field = kind === "categories" ? "category" : "holder";
     for (const debt of state.debts) {
       if (sameText(debt[field], oldClean)) {
         debt[field] = nextClean;
       }
     }
-  
+
     pushAudit("Переименован элемент справочника", dictionaryEntityType(kind), nextClean, [
       { field: "value", label: "Значение", before: oldClean, after: nextClean }
     ]);
     commit();
     return nextClean;
   }
-  
+
   function deleteDictionaryItem(kind, value) {
     const list = getDictionary(kind);
     const clean = requireText(value, "Значение");
     const field = kind === "categories" ? "category" : "holder";
     const usedBy = state.debts.filter((debt) => sameText(debt[field], clean));
-  
+
     if (usedBy.length) {
       throw new Error(`Нельзя удалить: значение используется в долгах (${usedBy.length}).`);
     }
-  
+
     const index = list.findIndex((item) => sameText(item, clean));
     if (index === -1) {
       throw new Error("Элемент справочника не найден");
     }
-  
+
     list.splice(index, 1);
     pushAudit("Удален элемент справочника", dictionaryEntityType(kind), clean, [
       { field: "value", label: "Значение", before: clean, after: "удалено" }
     ]);
     commit();
   }
-  
+
   function importStateFromJson(raw, mode = "replace", source = "Импорт JSON") {
     const imported = normalizeImportedState(typeof raw === "string" ? JSON.parse(raw) : raw);
-  
+
     if (mode === "replace") {
       state = imported;
       pushAudit(`${source}: состояние заменено`, "import", "replace", [
@@ -624,29 +686,29 @@
     } else {
       throw new Error("Неизвестный режим импорта");
     }
-  
+
     commit();
     return state;
   }
-  
+
   function recordGithubAction(action, details = []) {
     pushAudit(action, "github", "github-sync", details);
     commit();
   }
-  
+
   function loadState() {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (!raw) {
         return createEmptyState();
       }
-  
+
       return normalizeImportedState(JSON.parse(raw));
     } catch {
       return createEmptyState();
     }
   }
-  
+
   function createEmptyState() {
     return {
       version: 1,
@@ -656,10 +718,11 @@
       auditLog: []
     };
   }
-  
+
   function defaultSyncSettings() {
     return {
       enabled: false,
+      privacyAcknowledged: false,
       owner: "",
       repo: "",
       branch: "main",
@@ -667,12 +730,18 @@
       token: ""
     };
   }
-  
+
+  function syncRepositoryLabel(settings) {
+    const owner = cleanText(settings.owner);
+    const repo = cleanText(settings.repo);
+    return owner && repo ? `${owner}/${repo}` : "не настроен";
+  }
+
   function normalizeImportedState(input) {
     if (!input || typeof input !== "object") {
       throw new Error("JSON не похож на состояние приложения");
     }
-  
+
     const normalized = {
       version: 1,
       debts: Array.isArray(input.debts) ? input.debts.map(normalizeDebtFromImport) : [],
@@ -680,16 +749,16 @@
       dictionaries: normalizeDictionaries(input.dictionaries),
       auditLog: Array.isArray(input.auditLog) ? input.auditLog.map(normalizeAuditFromImport) : []
     };
-  
+
     const debtIds = new Set(normalized.debts.map((debt) => debt.id));
     normalized.entries = normalized.entries.filter((entry) => debtIds.has(entry.debtId));
     normalized.debts.sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
     normalized.entries.sort((a, b) => new Date(b.date) - new Date(a.date));
     normalized.auditLog.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
-  
+
     return normalized;
   }
-  
+
   function normalizeDebtFromImport(debt) {
     return {
       id: cleanText(debt.id) || uuid(),
@@ -702,7 +771,7 @@
       status: debt.status === "closed" ? "closed" : "active"
     };
   }
-  
+
   function normalizeEntryFromImport(entry) {
     return {
       id: cleanText(entry.id) || uuid(),
@@ -713,7 +782,7 @@
       comment: cleanText(entry.comment)
     };
   }
-  
+
   function normalizeAuditFromImport(record) {
     return {
       id: cleanText(record.id) || uuid(),
@@ -724,19 +793,19 @@
       details: record.details || ""
     };
   }
-  
+
   function normalizeDictionaries(dictionaries = {}) {
     return {
       categories: normalizeDictionaryList(dictionaries.categories, DEFAULT_DICTIONARIES.categories),
       holders: normalizeDictionaryList(dictionaries.holders, DEFAULT_DICTIONARIES.holders)
     };
   }
-  
+
   function normalizeDictionaryList(list, fallback) {
     const source = Array.isArray(list) ? list : fallback;
     return Array.from(new Set(source.map(cleanText).filter(Boolean))).sort((a, b) => a.localeCompare(b, "ru"));
   }
-  
+
   function normalizeDebtInput(input, id = uuid(), createdAt = new Date().toISOString()) {
     return {
       id,
@@ -749,7 +818,7 @@
       status: input.status === "closed" ? "closed" : "active"
     };
   }
-  
+
   function normalizeEntryInput(input, id = uuid()) {
     return {
       id,
@@ -760,7 +829,7 @@
       comment: cleanText(input.comment)
     };
   }
-  
+
   function mergeStates(current, imported) {
     const merged = normalizeImportedState(current);
     upsertById(merged.debts, imported.debts);
@@ -770,7 +839,7 @@
     merged.dictionaries.holders = mergeLists(merged.dictionaries.holders, imported.dictionaries.holders);
     return normalizeImportedState(merged);
   }
-  
+
   function upsertById(target, incoming) {
     for (const item of incoming) {
       const index = target.findIndex((existing) => existing.id === item.id);
@@ -781,11 +850,11 @@
       }
     }
   }
-  
+
   function mergeLists(left, right) {
     return Array.from(new Set([...(left || []), ...(right || [])].map(cleanText).filter(Boolean))).sort((a, b) => a.localeCompare(b, "ru"));
   }
-  
+
   function ensureDictionaryValue(kind, value, entityType) {
     const list = getDictionary(kind);
     const clean = requireText(value, "Значение справочника");
@@ -797,21 +866,21 @@
       ]);
     }
   }
-  
+
   function getDictionary(kind) {
     if (!["categories", "holders"].includes(kind)) {
       throw new Error("Неизвестный справочник");
     }
-  
+
     state.dictionaries ||= structuredCloneSafe(DEFAULT_DICTIONARIES);
     state.dictionaries[kind] ||= [];
     return state.dictionaries[kind];
   }
-  
+
   function dictionaryEntityType(kind) {
     return kind === "categories" ? "category" : "holder";
   }
-  
+
   function pushAudit(action, entityType, entityId, details) {
     state.auditLog.unshift(createAuditRecord({
       id: uuid(),
@@ -822,113 +891,113 @@
       details
     }));
   }
-  
+
   function commit() {
     saveState();
     notify();
   }
-  
+
   function saveState() {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   }
-  
+
   function notify() {
     for (const listener of listeners) {
       listener(state);
     }
   }
-  
+
   function findById(list, id, errorMessage) {
     const item = list.find((entry) => entry.id === id);
     if (!item) {
       throw new Error(errorMessage);
     }
-  
+
     return item;
   }
-  
+
   function positiveNumber(value, label) {
     const number = Number(String(value).replace(/\s/g, "").replace(",", "."));
     if (!Number.isFinite(number) || number <= 0) {
       throw new Error(`${label}: введите положительное число`);
     }
-  
+
     return Math.round(number);
   }
-  
+
   function normalizeIsoDate(value, label) {
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) {
       throw new Error(`${label}: неверная дата`);
     }
-  
+
     return date.toISOString();
   }
-  
+
   function requireText(value, label) {
     const clean = cleanText(value);
     if (!clean) {
       throw new Error(`${label}: заполните поле`);
     }
-  
+
     return clean;
   }
-  
+
   function cleanText(value) {
     return String(value ?? "").trim().replace(/\s+/g, " ");
   }
-  
+
   function sameText(left, right) {
     return cleanText(left).toLocaleLowerCase("ru-RU") === cleanText(right).toLocaleLowerCase("ru-RU");
   }
-  
+
   function containsValue(list, value) {
     return list.some((item) => sameText(item, value));
   }
-  
+
   function uuid() {
     if (globalThis.crypto?.randomUUID) {
       return globalThis.crypto.randomUUID();
     }
-  
+
     return "id-" + Math.random().toString(36).slice(2) + Date.now().toString(36);
   }
-  
+
   function structuredCloneSafe(value) {
     if (globalThis.structuredClone) {
       return globalThis.structuredClone(value);
     }
-  
+
     return JSON.parse(JSON.stringify(value));
   }
-  
+
 
   // js/github.js
   async function fetchGithubData(settings) {
-    const clean = validateSettings(settings, { requireToken: false });
+    const clean = validateSettings(settings, { requireAcknowledgement: true });
     const response = await fetch(contentsUrl(clean), {
       headers: headers(clean.token)
     });
-  
+
     if (!response.ok) {
       throw new Error(await githubError(response, "Не удалось загрузить data.json из GitHub"));
     }
-  
+
     const payload = await response.json();
     if (!payload.content) {
       throw new Error("GitHub вернул пустой файл");
     }
-  
+
     return {
       data: JSON.parse(decodeBase64(payload.content)),
       sha: payload.sha
     };
   }
-  
+
   async function pushGithubData(settings, state) {
-    const clean = validateSettings(settings, { requireToken: true });
+    const clean = validateSettings(settings, { requireToken: true, requireAcknowledgement: true });
     let sha = "";
-  
+
     try {
       const current = await fetchGithubData(clean);
       sha = current.sha;
@@ -937,17 +1006,17 @@
         throw error;
       }
     }
-  
+
     const body = {
       message: `Update ${clean.path} from debt tracker`,
       content: encodeBase64(JSON.stringify(state, null, 2)),
       branch: clean.branch
     };
-  
+
     if (sha) {
       body.sha = sha;
     }
-  
+
     const response = await fetch(contentsUrl(clean), {
       method: "PUT",
       headers: {
@@ -956,34 +1025,59 @@
       },
       body: JSON.stringify(body)
     });
-  
+
     if (!response.ok) {
       throw new Error(await githubError(response, "Не удалось сохранить data.json в GitHub"));
     }
-  
+
     return response.json();
   }
-  
+
+  async function getGithubRepositoryInfo(settings) {
+    const clean = validateSettings(settings);
+    const response = await fetchWithTimeout(repositoryUrl(clean), {
+      headers: headers(clean.token)
+    });
+
+    if (!response.ok) {
+      throw new Error(await githubError(response, "Не удалось проверить видимость репозитория"));
+    }
+
+    return response.json();
+  }
+
   function validateSettings(settings, options = {}) {
     const clean = {
+      enabled: Boolean(settings.enabled),
+      privacyAcknowledged: Boolean(settings.privacyAcknowledged),
       owner: String(settings.owner || "").trim(),
       repo: String(settings.repo || "").trim(),
       branch: String(settings.branch || "main").trim(),
       path: String(settings.path || "data.json").trim().replace(/^\/+/, ""),
       token: String(settings.token || "").trim()
     };
-  
+
     if (!clean.owner || !clean.repo || !clean.branch || !clean.path) {
       throw new Error("Заполните owner, repo, branch и путь к файлу");
     }
-  
+
     if (options.requireToken && !clean.token) {
       throw new Error("Для записи в GitHub нужен Personal Access Token");
     }
-  
+
+    if (options.requireAcknowledgement && (!clean.enabled || !clean.privacyAcknowledged)) {
+      throw new Error("Включите синхронизацию и подтвердите использование приватного репозитория");
+    }
+
     return clean;
   }
-  
+
+  function repositoryUrl(settings) {
+    const owner = encodeURIComponent(settings.owner);
+    const repo = encodeURIComponent(settings.repo);
+    return `https://api.github.com/repos/${owner}/${repo}`;
+  }
+
   function contentsUrl(settings) {
     const path = settings.path.split("/").map(encodeURIComponent).join("/");
     const owner = encodeURIComponent(settings.owner);
@@ -991,20 +1085,40 @@
     const branch = encodeURIComponent(settings.branch);
     return `https://api.github.com/repos/${owner}/${repo}/contents/${path}?ref=${branch}`;
   }
-  
+
   function headers(token) {
     const base = {
       Accept: "application/vnd.github+json",
       "X-GitHub-Api-Version": "2022-11-28"
     };
-  
+
     if (token) {
       base.Authorization = `Bearer ${token}`;
     }
-  
+
     return base;
   }
-  
+
+  async function fetchWithTimeout(url, options, timeoutMs = 6000) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+      return await fetch(url, {
+        ...options,
+        signal: controller.signal
+      });
+    } catch (error) {
+      if (error.name === "AbortError") {
+        throw new Error("Проверка видимости репозитория заняла слишком много времени");
+      }
+
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
   async function githubError(response, fallback) {
     try {
       const data = await response.json();
@@ -1014,13 +1128,13 @@
       return `${fallback} (${response.status})`;
     }
   }
-  
+
   function decodeBase64(value) {
     const binary = atob(String(value).replace(/\s/g, ""));
     const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
     return new TextDecoder().decode(bytes);
   }
-  
+
   function encodeBase64(value) {
     const bytes = new TextEncoder().encode(value);
     let binary = "";
@@ -1029,10 +1143,10 @@
     });
     return btoa(binary);
   }
-  
+
 
   // js/ui.js
-  
+
   const ui = {
     tab: "debts",
     debtFilter: "active",
@@ -1042,11 +1156,12 @@
     modal: null,
     toast: null,
     importMode: "replace",
-    syncStatus: ""
+    syncStatus: "",
+    syncStatusType: ""
   };
-  
+
   let root;
-  
+
   function initUI(element) {
     root = element;
     root.addEventListener("click", handleClick);
@@ -1056,14 +1171,14 @@
     subscribe(render);
     render();
   }
-  
+
   function render() {
     const state = getState();
     const selectedDebt = state.debts.find((debt) => debt.id === ui.selectedDebtId) || state.debts[0] || null;
     if (!ui.selectedDebtId && selectedDebt) {
       ui.selectedDebtId = selectedDebt.id;
     }
-  
+
     root.innerHTML = `
       <div class="app-shell">
         ${renderHeader()}
@@ -1075,7 +1190,7 @@
       ${renderToast()}
     `;
   }
-  
+
   function renderHeader() {
     return `
       <header class="topbar">
@@ -1091,7 +1206,7 @@
       </header>
     `;
   }
-  
+
   function renderSummary(state) {
     const summary = getSummary(state);
     return `
@@ -1101,8 +1216,12 @@
           <strong>${formatMoney(summary.activeBalance)}</strong>
         </article>
         <article class="metric-card">
-          <span>Суммарно выплачено</span>
+          <span>Выплачено всего</span>
           <strong>${formatMoney(summary.totalPaid)}</strong>
+        </article>
+        <article class="metric-card">
+          <span>Выплачено в счёт долга</span>
+          <strong>${formatMoney(summary.paidToDebt)}</strong>
         </article>
         <article class="metric-card">
           <span>Активных долгов</span>
@@ -1119,7 +1238,7 @@
       </section>
     `;
   }
-  
+
   function renderTabs() {
     const tabs = [
       ["debts", "Долги"],
@@ -1127,7 +1246,7 @@
       ["audit", "Журнал аудита"],
       ["settings", "Настройки"]
     ];
-  
+
     return `
       <nav class="tabs" aria-label="Разделы">
         ${tabs.map(([id, label]) => `
@@ -1138,31 +1257,31 @@
       </nav>
     `;
   }
-  
+
   function renderTabContent(state) {
     if (ui.tab === "analytics") {
       return renderAnalytics(state);
     }
-  
+
     if (ui.tab === "audit") {
       return renderAudit(state);
     }
-  
+
     if (ui.tab === "settings") {
       return renderSettings(state);
     }
-  
+
     return renderDebts(state);
   }
-  
+
   function renderDebts(state) {
     const debts = filterDebts(state.debts);
     const selectedDebt = debts.find((debt) => debt.id === ui.selectedDebtId) || debts[0] || null;
-  
+
     if (selectedDebt && ui.selectedDebtId !== selectedDebt.id) {
       ui.selectedDebtId = selectedDebt.id;
     }
-  
+
     if (!state.debts.length) {
       return `
         <main class="tab-panel">
@@ -1174,7 +1293,7 @@
         </main>
       `;
     }
-  
+
     return `
       <main class="tab-panel">
         <div class="toolbar">
@@ -1185,7 +1304,7 @@
           </div>
           <button class="button primary" type="button" data-action="open-debt">Новый долг</button>
         </div>
-  
+
         <section class="debt-layout">
           <div class="debt-list">
             ${debts.length ? debts.map((debt) => renderDebtCard(state, debt)).join("") : renderFilteredEmpty()}
@@ -1195,13 +1314,13 @@
       </main>
     `;
   }
-  
+
   function renderDebtCard(state, debt) {
     const stats = getDebtStats(state, debt);
     const selected = ui.selectedDebtId === debt.id ? "selected" : "";
     const statusClass = debt.status === "closed" ? "closed" : "active";
     const statusLabel = debt.status === "closed" ? "Закрыт" : "Активен";
-  
+
     return `
       <article class="debt-card ${selected}">
         <div class="card-head">
@@ -1211,7 +1330,7 @@
           </div>
           <span class="pill ${statusClass}">${statusLabel}</span>
         </div>
-  
+
         <div class="amount-grid">
           <div>
             <span>Начальная сумма</span>
@@ -1222,7 +1341,9 @@
             <strong class="${stats.isOverpaid ? "balance-overpaid" : "balance-positive"}">${formatBalance(stats.balance)}</strong>
           </div>
         </div>
-  
+
+        ${stats.isOverpaid ? `<span class="pill overpaid">Переплата ${formatMoney(stats.overpayment)}</span>` : ""}
+
         <div class="progress-block">
           <div class="progress-label">
             <span>Погашено</span>
@@ -1232,9 +1353,9 @@
             <div class="progress-fill" style="--progress: ${Math.round(stats.progress)}%"></div>
           </div>
         </div>
-  
+
         ${debt.note ? `<p class="note">${escapeHtml(debt.note)}</p>` : ""}
-  
+
         <div class="inline-actions">
           <button class="button small" type="button" data-action="select-debt" data-id="${debt.id}">Операции</button>
           <button class="button small ghost" type="button" data-action="open-debt" data-id="${debt.id}">Редактировать</button>
@@ -1246,15 +1367,15 @@
       </article>
     `;
   }
-  
+
   function renderEntryPanel(state, debt) {
     if (!debt) {
       return "";
     }
-  
+
     const entries = getDebtEntries(state, debt.id).sort((left, right) => new Date(right.date) - new Date(left.date));
     const stats = getDebtStats(state, debt);
-  
+
     return `
       <aside class="panel sticky">
         <div class="panel-head">
@@ -1264,7 +1385,7 @@
           </div>
           <button class="button primary" type="button" data-action="open-entry" data-debt-id="${debt.id}">Новая операция</button>
         </div>
-  
+
         <div class="entry-list">
           ${entries.length ? entries.map((entry) => renderEntryRow(entry)).join("") : `
             <div class="empty-state">
@@ -1276,7 +1397,7 @@
       </aside>
     `;
   }
-  
+
   function renderEntryRow(entry) {
     const label = entry.type === "payment" ? "Платеж" : "Начисление";
     const sign = entry.type === "payment" ? "−" : "+";
@@ -1297,7 +1418,7 @@
       </article>
     `;
   }
-  
+
   function renderAnalytics(state) {
     return `
       <main class="tab-panel">
@@ -1308,8 +1429,10 @@
       </main>
     `;
   }
-  
+
   function renderAnalyticsPanel(title, rows) {
+    const hasOverpayment = rows.some((row) => row.overpayment > 0);
+
     return `
       <section class="panel">
         <div class="panel-head">
@@ -1323,6 +1446,7 @@
                 <th>Активные</th>
                 <th>Остаток</th>
                 <th>Выплачено</th>
+                ${hasOverpayment ? "<th>Переплата</th>" : ""}
               </tr>
             </thead>
             <tbody>
@@ -1342,6 +1466,7 @@
                       <span class="bar-track"><span class="bar-fill paid" style="--bar: ${row.paidPercent}%"></span></span>
                     </div>
                   </td>
+                  ${hasOverpayment ? `<td>${row.overpayment ? formatMoney(row.overpayment) : "—"}</td>` : ""}
                 </tr>
               `).join("")}
             </tbody>
@@ -1355,13 +1480,13 @@
       </section>
     `;
   }
-  
+
   function renderAudit(state) {
     const query = ui.auditSearch.trim().toLocaleLowerCase("ru-RU");
     const rows = state.auditLog
       .filter((record) => ui.auditEntity === "all" || record.entityType === ui.auditEntity)
       .filter((record) => !query || auditSearchText(record).includes(query));
-  
+
     return `
       <main class="tab-panel">
         <section class="toolbar">
@@ -1375,7 +1500,7 @@
             <input class="filter-input" type="search" placeholder="Поиск по журналу" value="${escapeAttribute(ui.auditSearch)}" data-action="audit-search">
           </div>
         </section>
-  
+
         <section class="audit-list">
           ${rows.length ? rows.map((record) => renderAuditRow(record, query)).join("") : `
             <div class="empty-state">
@@ -1387,7 +1512,7 @@
       </main>
     `;
   }
-  
+
   function renderAuditRow(record, query) {
     const details = formatAuditDetails(record.details);
     return `
@@ -1403,9 +1528,11 @@
       </article>
     `;
   }
-  
+
   function renderSettings(state) {
     const sync = getSyncSettings();
+    const syncActionsDisabled = !sync.enabled || !sync.privacyAcknowledged;
+
     return `
       <main class="tab-panel">
         <section class="settings-grid">
@@ -1418,7 +1545,7 @@
               ${renderDictionary("Банки/удержатели", "holders", state.dictionaries.holders)}
             </div>
           </div>
-  
+
           <div class="panel">
             <div class="panel-head">
               <h2>Бэкап</h2>
@@ -1429,15 +1556,23 @@
             </div>
           </div>
         </section>
-  
+
         <section class="panel">
           <div class="panel-head">
             <h2>GitHub-синхронизация</h2>
           </div>
+          <div class="privacy-callout" role="note">
+            <strong>Важно о приватности</strong>
+            <p>Синхронизируйте только в приватный репозиторий. В публичном репозитории файл data.json с вашими долгами будет доступен всем. Секретность ссылки не защищает данные.</p>
+          </div>
           <form data-form="sync-settings">
             <label class="checkbox-field">
-              <input type="checkbox" name="enabled" ${sync.enabled ? "checked" : ""}>
+              <input type="checkbox" name="enabled" data-action="sync-enabled" ${sync.enabled ? "checked" : ""}>
               <span>Включить синхронизацию</span>
+            </label>
+            <label class="checkbox-field privacy-confirmation">
+              <input type="checkbox" name="privacyAcknowledged" data-action="sync-risk-ack" ${sync.privacyAcknowledged ? "checked" : ""}>
+              <span>Я понимаю риск и использую приватный репозиторий</span>
             </label>
             <div class="field-grid">
               ${field("owner", "Owner", sync.owner)}
@@ -1446,21 +1581,29 @@
               ${field("path", "Путь к data.json", sync.path || "data.json")}
             </div>
             <div class="field">
-              <label for="sync-token">Personal Access Token</label>
+              <label for="sync-token">
+                Personal Access Token
+                <span class="field-hint">Используйте fine-grained PAT только для нужного репозитория: Contents read/write и короткий срок жизни.</span>
+              </label>
               <input id="sync-token" name="token" type="password" autocomplete="off" value="${escapeAttribute(sync.token)}">
+              <label class="checkbox-field token-visibility-toggle">
+                <input type="checkbox" data-action="toggle-token-visibility">
+                <span>Показать токен</span>
+              </label>
             </div>
             <div class="settings-actions">
               <button class="button primary" type="submit">Сохранить настройки</button>
-              <button class="button ghost" type="button" data-action="github-load">Загрузить из GitHub</button>
-              <button class="button ghost" type="button" data-action="github-save">Сохранить в GitHub</button>
+              <button class="button ghost" type="button" data-action="github-load" data-sync-action ${syncActionsDisabled ? "disabled" : ""}>Загрузить из GitHub</button>
+              <button class="button ghost" type="button" data-action="github-save" data-sync-action ${syncActionsDisabled ? "disabled" : ""}>Сохранить в GitHub</button>
+              <button class="button danger" type="button" data-action="remove-sync-token">Удалить токен из браузера</button>
             </div>
           </form>
-          ${ui.syncStatus ? `<div class="sync-status">${escapeHtml(ui.syncStatus)}</div>` : ""}
+          ${ui.syncStatus ? `<div class="sync-status ${ui.syncStatusType}">${escapeHtml(ui.syncStatus)}</div>` : ""}
         </section>
       </main>
     `;
   }
-  
+
   function renderDictionary(title, kind, items) {
     return `
       <section>
@@ -1483,23 +1626,23 @@
       </section>
     `;
   }
-  
+
   function renderModal(state) {
     if (!ui.modal) {
       return "";
     }
-  
+
     if (ui.modal.type === "debt") {
       const debt = state.debts.find((item) => item.id === ui.modal.id);
       return modal(debt ? "Редактировать долг" : "Новый долг", renderDebtForm(state, debt));
     }
-  
+
     if (ui.modal.type === "entry") {
       const entry = state.entries.find((item) => item.id === ui.modal.id);
       const debtId = ui.modal.debtId || entry?.debtId || ui.selectedDebtId;
       return modal(entry ? "Редактировать операцию" : "Новая операция", renderEntryForm(state, entry, debtId));
     }
-  
+
     if (ui.modal.type === "confirmClose") {
       const debt = state.debts.find((item) => item.id === ui.modal.debtId);
       if (!debt) {
@@ -1513,7 +1656,7 @@
         </div>
       `);
     }
-  
+
     if (ui.modal.type === "import") {
       return modal("Импорт JSON", `
         <div class="field">
@@ -1532,10 +1675,10 @@
         </div>
       `);
     }
-  
+
     return "";
   }
-  
+
   function renderDebtForm(state, debt) {
     const values = debt || {
       name: "",
@@ -1545,7 +1688,7 @@
       note: "",
       status: "active"
     };
-  
+
     return `
       <form data-form="debt" data-id="${debt?.id || ""}">
         <div class="field-grid">
@@ -1576,7 +1719,7 @@
       </form>
     `;
   }
-  
+
   function renderEntryForm(state, entry, debtId) {
     const values = entry || {
       debtId,
@@ -1585,7 +1728,7 @@
       date: todayInputValue(),
       comment: ""
     };
-  
+
     return `
       <form data-form="entry" data-id="${entry?.id || ""}">
         <div class="field-grid">
@@ -1620,7 +1763,7 @@
       </form>
     `;
   }
-  
+
   function modal(title, body) {
     return `
       <div class="modal-backdrop" role="presentation" data-action="backdrop-close">
@@ -1631,27 +1774,27 @@
       </div>
     `;
   }
-  
+
   function renderToast() {
     if (!ui.toast) {
       return "";
     }
-  
+
     return `
       <div class="toast-stack">
         <div class="toast ${ui.toast.type}">${escapeHtml(ui.toast.message)}</div>
       </div>
     `;
   }
-  
+
   function handleClick(event) {
     const target = event.target.closest("[data-action]");
     if (!target) {
       return;
     }
-  
+
     const action = target.dataset.action;
-  
+
     if (action === "set-tab") {
       ui.tab = target.dataset.tab;
       render();
@@ -1699,18 +1842,20 @@
       loadFromGithub();
     } else if (action === "github-save") {
       saveToGithub();
+    } else if (action === "remove-sync-token") {
+      removeTokenFromBrowser();
     }
   }
-  
+
   function handleSubmit(event) {
     const form = event.target.closest("form[data-form]");
     if (!form) {
       return;
     }
-  
+
     event.preventDefault();
     const type = form.dataset.form;
-  
+
     if (type === "debt") {
       submitDebt(form);
     } else if (type === "entry") {
@@ -1721,7 +1866,7 @@
       submitSyncSettings(form);
     }
   }
-  
+
   function handleChange(event) {
     const target = event.target;
     if (target.dataset.action === "audit-filter") {
@@ -1731,9 +1876,16 @@
       ui.importMode = target.value;
     } else if (target.dataset.action === "import-file") {
       importFile(target.files?.[0]);
+    } else if (target.dataset.action === "sync-enabled" || target.dataset.action === "sync-risk-ack") {
+      updateSyncActionAvailability(target.form);
+    } else if (target.dataset.action === "toggle-token-visibility") {
+      const tokenInput = target.form?.elements.token;
+      if (tokenInput) {
+        tokenInput.type = target.checked ? "text" : "password";
+      }
     }
   }
-  
+
   function handleInput(event) {
     const target = event.target;
     if (target.dataset.action === "audit-search") {
@@ -1741,7 +1893,7 @@
       render();
     }
   }
-  
+
   function submitDebt(form) {
     run(() => {
       const data = Object.fromEntries(new FormData(form).entries());
@@ -1754,7 +1906,7 @@
       toast(id ? "Долг обновлен" : "Долг создан", "success");
     });
   }
-  
+
   function submitEntry(form) {
     run(() => {
       const data = Object.fromEntries(new FormData(form).entries());
@@ -1766,7 +1918,7 @@
       offerCloseIfNeeded(entry.debtId);
     });
   }
-  
+
   function submitDictionary(form) {
     run(() => {
       addDictionaryItem(form.dataset.kind, new FormData(form).get("value"));
@@ -1774,23 +1926,32 @@
       toast("Справочник обновлен", "success");
     });
   }
-  
-  function submitSyncSettings(form) {
-    run(() => {
+
+  async function submitSyncSettings(form) {
+    try {
       const data = Object.fromEntries(new FormData(form).entries());
       data.enabled = Boolean(form.elements.enabled.checked);
-      saveSyncSettings(data);
-      ui.syncStatus = "Настройки сохранены локально.";
+      data.privacyAcknowledged = Boolean(form.elements.privacyAcknowledged.checked);
+      const settings = saveSyncSettings(data);
+
+      if (settings.enabled) {
+        await inspectGithubRepositoryPrivacy(settings);
+      } else {
+        setSyncStatus("Настройки сохранены локально. Синхронизация выключена.");
+      }
+
       toast("Настройки синхронизации сохранены", "success");
-    });
+    } catch (error) {
+      toast(error.message || "Не удалось сохранить настройки синхронизации", "error");
+    }
   }
-  
+
   function confirmDeleteDebt(id) {
     const debt = getState().debts.find((item) => item.id === id);
     if (!debt) {
       return;
     }
-  
+
     if (confirm(`Удалить долг «${debt.name}» и все его операции?`)) {
       run(() => {
         deleteDebt(id);
@@ -1801,13 +1962,13 @@
       });
     }
   }
-  
+
   function toggleDebt(id) {
     const debt = getState().debts.find((item) => item.id === id);
     if (!debt) {
       return;
     }
-  
+
     const next = debt.status === "active" ? "closed" : "active";
     run(() => {
       setDebtStatus(id, next);
@@ -1815,7 +1976,7 @@
       toast(next === "closed" ? "Долг закрыт" : "Долг переоткрыт", "success");
     });
   }
-  
+
   function confirmDeleteEntry(id) {
     if (confirm("Удалить операцию?")) {
       run(() => {
@@ -1824,44 +1985,44 @@
       });
     }
   }
-  
+
   function renameDictionary(kind, oldValue) {
     const value = prompt("Новое значение", oldValue);
     if (value === null) {
       return;
     }
-  
+
     run(() => {
       renameDictionaryItem(kind, oldValue, value);
       toast("Справочник обновлен", "success");
     });
   }
-  
+
   function removeDictionary(kind, value) {
     if (!confirm(`Удалить «${value}» из справочника?`)) {
       return;
     }
-  
+
     run(() => {
       deleteDictionaryItem(kind, value);
       toast("Элемент справочника удален", "success");
     });
   }
-  
+
   function offerCloseIfNeeded(debtId) {
     const state = getState();
     const debt = state.debts.find((item) => item.id === debtId);
     if (!debt || debt.status === "closed") {
       return;
     }
-  
+
     const stats = getDebtStats(state, debt);
     if (stats.balance <= 0) {
       ui.modal = { type: "confirmClose", debtId };
       render();
     }
   }
-  
+
   function exportJson() {
     const blob = new Blob([exportState()], { type: "application/json;charset=utf-8" });
     const url = URL.createObjectURL(blob);
@@ -1874,16 +2035,16 @@
     URL.revokeObjectURL(url);
     toast("JSON экспортирован", "success");
   }
-  
+
   async function importFile(file) {
     if (!file) {
       return;
     }
-  
+
     if (!confirm(ui.importMode === "replace" ? "Заменить текущее состояние данными из файла?" : "Слить данные файла с текущим состоянием?")) {
       return;
     }
-  
+
     try {
       const text = await file.text();
       importStateFromJson(text, ui.importMode, "Импорт JSON");
@@ -1893,50 +2054,114 @@
       toast(error.message || "Не удалось импортировать JSON", "error");
     }
   }
-  
+
   async function loadFromGithub() {
-    if (!confirm("Загрузить состояние из GitHub и заменить локальные данные?")) {
-      return;
-    }
-  
     try {
+      const settings = requireSyncAuthorization();
+      if (!confirm("Загрузить состояние из GitHub и заменить локальные данные?")) {
+        return;
+      }
+
       ui.syncStatus = "Загрузка из GitHub...";
+      ui.syncStatusType = "";
       render();
-      const { data } = await fetchGithubData(getSyncSettings());
+      const { data } = await fetchGithubData(settings);
       importStateFromJson(data, "replace", "GitHub");
       recordGithubAction("Данные загружены из GitHub", [
         { field: "mode", label: "Режим", before: "локальное состояние", after: "замена из GitHub" }
       ]);
-      ui.syncStatus = "Данные загружены из GitHub.";
+      setSyncStatus("Данные загружены из GitHub.", "good");
       toast("Синхронизация выполнена", "success");
     } catch (error) {
-      ui.syncStatus = error.message || "Ошибка загрузки из GitHub";
+      setSyncStatus(error.message || "Ошибка загрузки из GitHub", "bad");
       toast(ui.syncStatus, "error");
-      render();
     }
   }
-  
+
   async function saveToGithub() {
-    if (!confirm("Сохранить текущее состояние в GitHub data.json?")) {
-      return;
-    }
-  
     try {
-      ui.syncStatus = "Сохранение в GitHub...";
+      const settings = requireSyncAuthorization();
+      const repositoryPrivacy = await inspectGithubRepositoryPrivacy(settings);
       render();
-      await pushGithubData(getSyncSettings(), getState());
+
+      const confirmationMessage = repositoryPrivacy === "public"
+        ? "Внимание: GitHub сообщает, что репозиторий публичный. Файл data.json с вашими долгами будет доступен всем. Продолжить сохранение?"
+        : "Сохранить текущее состояние в GitHub data.json?";
+      if (!confirm(confirmationMessage)) {
+        return;
+      }
+
+      ui.syncStatus = "Сохранение в GitHub...";
+      ui.syncStatusType = "";
+      render();
+      await pushGithubData(settings, getState());
       recordGithubAction("Данные сохранены в GitHub", [
-        { field: "path", label: "Путь", before: "локальное состояние", after: getSyncSettings().path }
+        { field: "path", label: "Путь", before: "локальное состояние", after: settings.path }
       ]);
-      ui.syncStatus = "Данные сохранены в GitHub.";
+      setSyncStatus("Данные сохранены в GitHub.", "good");
       toast("Данные сохранены в GitHub", "success");
     } catch (error) {
-      ui.syncStatus = error.message || "Ошибка сохранения в GitHub";
+      setSyncStatus(error.message || "Ошибка сохранения в GitHub", "bad");
       toast(ui.syncStatus, "error");
-      render();
     }
   }
-  
+
+  function removeTokenFromBrowser() {
+    if (!confirm("Удалить сохраненный токен GitHub только из этого браузера?")) {
+      return;
+    }
+
+    run(() => {
+      const hadToken = removeSyncToken();
+      setSyncStatus(hadToken ? "Токен удален из браузера." : "Сохраненного токена в браузере не было.");
+      toast(hadToken ? "Токен удален из браузера" : "Сохраненного токена нет", "success");
+    });
+  }
+
+  function requireSyncAuthorization() {
+    const settings = getSyncSettings();
+    if (!settings.enabled || !settings.privacyAcknowledged) {
+      throw new Error("Включите синхронизацию и подтвердите использование приватного репозитория");
+    }
+
+    return settings;
+  }
+
+  async function inspectGithubRepositoryPrivacy(settings) {
+    try {
+      const repository = await getGithubRepositoryInfo(settings);
+      if (repository.private) {
+        setSyncStatus("GitHub подтвердил: репозиторий приватный.", "good");
+        return "private";
+      }
+
+      setSyncStatus("Внимание: GitHub сообщает, что репозиторий публичный. Не сохраняйте в него data.json с личными долгами.", "bad");
+      return "public";
+    } catch {
+      setSyncStatus("Не удалось определить видимость репозитория. Синхронизация остается доступной.", "");
+      return "unknown";
+    }
+  }
+
+  function setSyncStatus(message, type = "") {
+    ui.syncStatus = message;
+    ui.syncStatusType = type;
+  }
+
+  function updateSyncActionAvailability(form) {
+    if (!form) {
+      return;
+    }
+
+    const enabled = Boolean(form.elements.enabled?.checked);
+    const acknowledged = Boolean(form.elements.privacyAcknowledged?.checked);
+    const savedSettings = getSyncSettings();
+    const savedAuthorization = savedSettings.enabled && savedSettings.privacyAcknowledged;
+    form.querySelectorAll("[data-sync-action]").forEach((button) => {
+      button.disabled = !enabled || !acknowledged || !savedAuthorization;
+    });
+  }
+
   function field(name, label, value = "", type = "text", required = false) {
     return `
       <div class="field">
@@ -1945,7 +2170,7 @@
       </div>
     `;
   }
-  
+
   function selectWithNew(name, label, value, options, newName, newLabel) {
     return `
       <div class="field-row">
@@ -1961,15 +2186,15 @@
       </div>
     `;
   }
-  
+
   function filterDebts(debts) {
     if (ui.debtFilter === "all") {
       return debts;
     }
-  
+
     return debts.filter((debt) => debt.status === ui.debtFilter);
   }
-  
+
   function renderFilteredEmpty() {
     return `
       <section class="empty-state">
@@ -1978,7 +2203,7 @@
       </section>
     `;
   }
-  
+
   function auditSearchText(record) {
     return [
       record.action,
@@ -1987,17 +2212,17 @@
       formatAuditDetails(record.details)
     ].join(" ").toLocaleLowerCase("ru-RU");
   }
-  
+
   function highlight(text, query) {
     const escaped = escapeHtml(text);
     if (!query) {
       return escaped;
     }
-  
+
     const safeQuery = escapeRegExp(escapeHtml(query));
     return escaped.replace(new RegExp(`(${safeQuery})`, "giu"), "<mark>$1</mark>");
   }
-  
+
   function run(callback) {
     try {
       callback();
@@ -2005,7 +2230,7 @@
       toast(error.message || "Действие не выполнено", "error");
     }
   }
-  
+
   function toast(message, type = "success") {
     ui.toast = { message, type };
     render();
@@ -2015,7 +2240,7 @@
       render();
     }, 3600);
   }
-  
+
   function escapeHtml(value) {
     return String(value ?? "")
       .replaceAll("&", "&amp;")
@@ -2024,25 +2249,25 @@
       .replaceAll('"', "&quot;")
       .replaceAll("'", "&#039;");
   }
-  
+
   function escapeAttribute(value) {
     return escapeHtml(value).replaceAll("\n", " ");
   }
-  
+
   function escapeRegExp(value) {
     return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   }
-  
+
 
   // js/main.js
-  
+
   const appRoot = document.querySelector("#app");
-  
+
   if (!appRoot) {
     throw new Error("Корневой элемент приложения не найден");
   }
-  
+
   initUI(appRoot);
-  
+
 
 })();

@@ -1,5 +1,5 @@
 export async function fetchGithubData(settings) {
-  const clean = validateSettings(settings, { requireToken: false });
+  const clean = validateSettings(settings, { requireAcknowledgement: true });
   const response = await fetch(contentsUrl(clean), {
     headers: headers(clean.token)
   });
@@ -20,7 +20,7 @@ export async function fetchGithubData(settings) {
 }
 
 export async function pushGithubData(settings, state) {
-  const clean = validateSettings(settings, { requireToken: true });
+  const clean = validateSettings(settings, { requireToken: true, requireAcknowledgement: true });
   let sha = "";
 
   try {
@@ -58,8 +58,23 @@ export async function pushGithubData(settings, state) {
   return response.json();
 }
 
+export async function getGithubRepositoryInfo(settings) {
+  const clean = validateSettings(settings);
+  const response = await fetchWithTimeout(repositoryUrl(clean), {
+    headers: headers(clean.token)
+  });
+
+  if (!response.ok) {
+    throw new Error(await githubError(response, "Не удалось проверить видимость репозитория"));
+  }
+
+  return response.json();
+}
+
 function validateSettings(settings, options = {}) {
   const clean = {
+    enabled: Boolean(settings.enabled),
+    privacyAcknowledged: Boolean(settings.privacyAcknowledged),
     owner: String(settings.owner || "").trim(),
     repo: String(settings.repo || "").trim(),
     branch: String(settings.branch || "main").trim(),
@@ -75,7 +90,17 @@ function validateSettings(settings, options = {}) {
     throw new Error("Для записи в GitHub нужен Personal Access Token");
   }
 
+  if (options.requireAcknowledgement && (!clean.enabled || !clean.privacyAcknowledged)) {
+    throw new Error("Включите синхронизацию и подтвердите использование приватного репозитория");
+  }
+
   return clean;
+}
+
+function repositoryUrl(settings) {
+  const owner = encodeURIComponent(settings.owner);
+  const repo = encodeURIComponent(settings.repo);
+  return `https://api.github.com/repos/${owner}/${repo}`;
 }
 
 function contentsUrl(settings) {
@@ -97,6 +122,26 @@ function headers(token) {
   }
 
   return base;
+}
+
+async function fetchWithTimeout(url, options, timeoutMs = 6000) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    return await fetch(url, {
+      ...options,
+      signal: controller.signal
+    });
+  } catch (error) {
+    if (error.name === "AbortError") {
+      throw new Error("Проверка видимости репозитория заняла слишком много времени");
+    }
+
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 async function githubError(response, fallback) {

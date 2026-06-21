@@ -47,8 +47,10 @@ export function getSyncSettings() {
 }
 
 export function saveSyncSettings(settings) {
+  const previous = getSyncSettings();
   const clean = {
     enabled: Boolean(settings.enabled),
+    privacyAcknowledged: Boolean(settings.privacyAcknowledged),
     owner: cleanText(settings.owner),
     repo: cleanText(settings.repo),
     branch: cleanText(settings.branch) || "main",
@@ -56,14 +58,59 @@ export function saveSyncSettings(settings) {
     token: cleanText(settings.token)
   };
 
+  if (clean.enabled && !clean.privacyAcknowledged) {
+    throw new Error("Подтвердите, что используете приватный репозиторий, перед включением синхронизации");
+  }
+
   localStorage.setItem(SYNC_SETTINGS_KEY, JSON.stringify(clean));
   pushAudit("Настройки GitHub-синхронизации изменены", "github", "settings", [
-    { field: "repo", label: "Репозиторий", before: "прежние настройки", after: `${clean.owner}/${clean.repo}` },
-    { field: "path", label: "Путь", before: "прежний путь", after: clean.path },
-    { field: "enabled", label: "Синхронизация", before: "прежний режим", after: clean.enabled ? "включена" : "выключена" }
+    {
+      field: "repo",
+      label: "Репозиторий",
+      before: syncRepositoryLabel(previous),
+      after: syncRepositoryLabel(clean)
+    },
+    { field: "path", label: "Путь", before: previous.path, after: clean.path },
+    {
+      field: "enabled",
+      label: "Синхронизация",
+      before: previous.enabled ? "включена" : "выключена",
+      after: clean.enabled ? "включена" : "выключена"
+    },
+    {
+      field: "privacyAcknowledged",
+      label: "Подтверждение риска",
+      before: previous.privacyAcknowledged ? "подтверждено" : "не подтверждено",
+      after: clean.privacyAcknowledged ? "подтверждено" : "не подтверждено"
+    },
+    {
+      field: "token",
+      label: "Токен",
+      before: previous.token ? "сохранен" : "не сохранен",
+      after: clean.token ? "сохранен" : "не сохранен"
+    }
   ]);
   commit();
   return clean;
+}
+
+export function removeSyncToken() {
+  const settings = getSyncSettings();
+  const hadToken = Boolean(settings.token);
+  localStorage.setItem(SYNC_SETTINGS_KEY, JSON.stringify({
+    ...settings,
+    token: ""
+  }));
+  pushAudit("Токен GitHub удален из браузера", "github", "settings", [
+    {
+      field: "token",
+      label: "Токен",
+      before: hadToken ? "сохранен" : "не сохранен",
+      after: "удален"
+    }
+  ]);
+  commit();
+  return hadToken;
 }
 
 export function exportState() {
@@ -322,12 +369,19 @@ function createEmptyState() {
 function defaultSyncSettings() {
   return {
     enabled: false,
+    privacyAcknowledged: false,
     owner: "",
     repo: "",
     branch: "main",
     path: "data.json",
     token: ""
   };
+}
+
+function syncRepositoryLabel(settings) {
+  const owner = cleanText(settings.owner);
+  const repo = cleanText(settings.repo);
+  return owner && repo ? `${owner}/${repo}` : "не настроен";
 }
 
 function normalizeImportedState(input) {

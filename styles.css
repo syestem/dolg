@@ -138,6 +138,12 @@ textarea:focus-visible {
   transform: translateY(1px);
 }
 
+.button:disabled,
+.icon-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
 .button.primary {
   background: var(--accent);
   color: #081512;
@@ -177,7 +183,7 @@ textarea:focus-visible {
 
 .summary-grid {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(6, minmax(0, 1fr));
   gap: 12px;
   margin: 0 0 16px;
 }
@@ -686,6 +692,42 @@ textarea:focus-visible {
 .sync-status.bad {
   border-color: rgb(255 122 122 / 45%);
   color: #ffb8b8;
+}
+
+.privacy-callout {
+  margin: 14px 0;
+  padding: 12px;
+  border: 1px solid rgb(255 209 102 / 48%);
+  border-left: 4px solid var(--warning);
+  border-radius: var(--radius);
+  background: rgb(255 209 102 / 8%);
+  color: #ffe0a3;
+}
+
+.privacy-callout strong {
+  display: block;
+}
+
+.privacy-callout p {
+  margin: 6px 0 0;
+  line-height: 1.45;
+}
+
+.privacy-confirmation {
+  padding: 8px 10px;
+  border: 1px solid rgb(255 209 102 / 34%);
+  border-radius: var(--radius);
+  background: rgb(255 209 102 / 6%);
+}
+
+.field-hint {
+  display: block;
+  margin-top: 4px;
+  line-height: 1.4;
+}
+
+.token-visibility-toggle {
+  margin-top: 4px;
 }
 
 @media (max-width: 1180px) {
