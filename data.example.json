@@ -1,0 +1,74 @@
+{
+  "version": 1,
+  "debts": [
+    {
+      "id": "example-debt-1",
+      "name": "Кредитная карта",
+      "category": "Кредитная карта",
+      "holder": "Т-Банк",
+      "initialAmount": 150000,
+      "createdAt": "2026-06-01T00:00:00.000Z",
+      "note": "Минимальный платеж до 25 числа",
+      "status": "active"
+    },
+    {
+      "id": "example-debt-2",
+      "name": "Рассрочка на ноутбук",
+      "category": "Рассрочка",
+      "holder": "Альфа-Банк",
+      "initialAmount": 90000,
+      "createdAt": "2026-05-12T00:00:00.000Z",
+      "note": "",
+      "status": "active"
+    }
+  ],
+  "entries": [
+    {
+      "id": "example-entry-1",
+      "debtId": "example-debt-1",
+      "type": "payment",
+      "amount": 15000,
+      "date": "2026-06-10T00:00:00.000Z",
+      "comment": "Платеж за июнь"
+    },
+    {
+      "id": "example-entry-2",
+      "debtId": "example-debt-1",
+      "type": "charge",
+      "amount": 2500,
+      "date": "2026-06-15T00:00:00.000Z",
+      "comment": "Проценты"
+    },
+    {
+      "id": "example-entry-3",
+      "debtId": "example-debt-2",
+      "type": "payment",
+      "amount": 10000,
+      "date": "2026-06-08T00:00:00.000Z",
+      "comment": "Ежемесячный платеж"
+    }
+  ],
+  "dictionaries": {
+    "categories": [
+      "Кредитная карта",
+      "Потребительский кредит",
+      "Рассрочка",
+      "Займ"
+    ],
+    "holders": [
+      "Сбербанк",
+      "Т-Банк",
+      "Альфа-Банк"
+    ]
+  },
+  "auditLog": [
+    {
+      "id": "example-audit-1",
+      "timestamp": "2026-06-01T00:00:00.000Z",
+      "action": "Создан пример долга",
+      "entityType": "debt",
+      "entityId": "example-debt-1",
+      "details": "Пример структуры данных"
+    }
+  ]
+}
